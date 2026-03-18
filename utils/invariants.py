@@ -4,6 +4,7 @@ specifications, such as braids, paths, sequences of grids, and winding numbers.
 """
 
 import numpy as np
+from scipy.interpolate import CubicSpline
 
 
 def grids2paths(grids: np.ndarray) -> np.ndarray:
@@ -150,10 +151,13 @@ def paths2windings(
         ValueError: If 'upscale_factor' is not a positive integer.
         ValueError: If 'intermediate_shape' is not 'linear' or 'spline'.
 
-    Note:
-        The winding numbers are multiplied by 2 to make so that they are integers at
-        the end of each timestep (i.e., when they are topological invariants for the
-        braids corresponding to the input paths).
+    Notes:
+        - The winding numbers are multiplied by 2 to make so that they are integers at
+          the end of each timestep (i.e., when they are topological invariants for the
+          braids corresponding to the input paths).
+        - If using the 'spline' interpolation method for upscaling, the resuling paths
+          may not correspond to the same braid as the original paths, since the spline
+          interpolation can introduce additional crossings between agents.
     """
     # Validate inputs
     if not isinstance(paths, np.ndarray):
@@ -171,9 +175,27 @@ def paths2windings(
             "Input 'intermediate_shape' must be either 'linear' or 'spline'."
         )
 
+    # Upscale paths if needed
+    if upscale_factor > 1:
+        n, _, m = paths.shape
+        new_n = (n - 1) * upscale_factor + 1
+        upscaled_paths = np.zeros((new_n, 2, m), dtype=float)
+        for i in range(m):
+            if intermediate_shape == "linear":
+                upscaled_paths[:, :, i] = np.interp(
+                    np.linspace(0, n - 1, new_n),
+                    np.arange(n),
+                    paths[:, :, i].T,
+                ).T
+            elif intermediate_shape == "spline":
+                cs_x = CubicSpline(np.arange(n), paths[:, 0, i])
+                cs_y = CubicSpline(np.arange(n), paths[:, 1, i])
+                upscaled_paths[:, 0, i] = cs_x(np.linspace(0, n - 1, new_n))
+                upscaled_paths[:, 1, i] = cs_y(np.linspace(0, n - 1, new_n))
+        paths = upscaled_paths
+
     # Extract dimensions
-    n = paths.shape[0]  # Number of time steps
-    m = paths.shape[2]  # Number of agents
+    n, _, m = paths.shape
 
     # Initialize variables
     windings: np.ndarray = np.zeros((n, m, m), dtype=float)
