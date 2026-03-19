@@ -131,6 +131,8 @@ def plot_winding_numbers(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, pl
             of m agents' winding numbers. Each entry windings[t, i, j] gives the winding
             number of agent i with respect to agent j at time step t.
         figsize (tuple[float, float], optional): The size of the figure in cm.
+        show_legends (bool, optional): Whether to show legends for the plot. Default is
+            False.
 
     Returns:
         tuple[plt.Figure, plt.Axes]: The figure and axes objects for the plot.
@@ -141,6 +143,7 @@ def plot_winding_numbers(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, pl
     """
     # Parse kwargs
     figsize = kwargs.get("figsize", (10, 10))
+    show_legends = kwargs.get("show_legends", False)
 
     # Validate inputs
     if not isinstance(windings, np.ndarray):
@@ -151,9 +154,48 @@ def plot_winding_numbers(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, pl
     # Extract dimensions
     n, m, _ = windings.shape
 
+    # Create plot variables
+    time = np.arange(n)  # Create time array for z-axis
+    colors = plt.cm.get_cmap("tab10", m).colors  # Define colormaps
+
     # Create the plot
+    plot_cols = 3
+    plot_rows = m // 3 + (m % 3 > 0)
     figsize = figsize / 2.54  # convert cm to in
-    fig, ax = plt.subplots(figsize=figsize)
-    # TODO
+    fig: plt.Figure
+    ax: np.ndarray[plt.Axes]
+    fig, ax = plt.subplots(nrows=plot_rows, ncols=plot_cols, figsize=figsize)
+    for i in range(m):
+        row = i // plot_cols
+        col = i % plot_cols
+        for j in range(m):
+            ax[row, col].plot(
+                time,
+                windings[:, i, j],
+                linewidth=1.3,
+                color=colors[j],
+                label=f"w_{{{i}{j}}}",
+            )
+
+        # Set labels and title
+        ax[row, col].set_aspect("equal", "box")
+        ax[row, col].set_xlim(0, n - 1)
+        ax[row, col].set_ylim(windings.min() - 1, windings.max() + 1)
+        ax[row, col].grid(
+            True, which="major", linestyle=":", color="gray", linewidth=0.5, zorder=1
+        )
+        ax[row, col].grid(
+            True, which="minor", linestyle=":", color="gray", linewidth=0.3, zorder=1
+        )
+        ax[row, col].minorticks_on()
+        ax[row, col].set_title(f"Agent {i}")
+        ax[row, col].set_xlabel("t")
+        ax[row, col].set_ylabel("$w_{ij}$")
+        ax[row, col].grid(True)
+
+        if show_legends:
+            ax[row, col].legend()
+
+        plt.show()
 
     return fig, ax
