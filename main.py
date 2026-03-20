@@ -1,7 +1,8 @@
 import matplotlib.pyplot as plt
+import numpy as np
 
 from data import grids_2
-from utils import invariants
+from utils import braidlab, invariants
 from visualization import plot
 
 # Load data
@@ -12,18 +13,17 @@ paths = invariants.grids2paths(grids)
 plot.plot_paths_3d(paths, show=False)
 
 # Compute winding numbers
-windings_linear = invariants.paths2windings(
-    paths,
-    upscale_factor=20,
-    intermediate_shape="linear",
-)
-plot.plot_windings(windings_linear, show=False)
 windings_spline = invariants.paths2windings(
     paths,
     upscale_factor=20,
     intermediate_shape="spline",
 )
 plot.plot_windings(windings_spline, show=False)
+
+# Compute braid representations
+b = braidlab.Braidlab()
+braid = b.paths2braid(paths, angle=0 * np.pi / 180)
+print("Braid representation:", braid)
 
 # Show all plots
 plt.show()
