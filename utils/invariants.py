@@ -7,6 +7,25 @@ import numpy as np
 from scipy.interpolate import CubicSpline
 
 
+def angle_diff(
+    alpha: float | np.ndarray,
+    beta: float | np.ndarray,
+) -> float | np.ndarray:
+    """
+    Compute the difference between two angles alpha and beta, taking into account
+    the periodicity of angles.
+
+    Args:
+        alpha (float or np.ndarray): The first angle(s) in radians.
+        beta (float or np.ndarray): The second angle(s) in radians.
+
+    Returns:
+        float or np.ndarray: The difference between alpha and beta, normalized to the
+            range (-pi, pi].
+    """
+    return np.arctan2(np.sin(alpha - beta), np.cos(alpha - beta))
+
+
 def grids2paths(grids: np.ndarray) -> np.ndarray:
     """
     Convert a list of grids to a list of paths.
@@ -43,15 +62,15 @@ def grids2paths(grids: np.ndarray) -> np.ndarray:
     paths = np.zeros((n, 2, m), dtype=float)
     for t in range(n):
         for i in range(m):
-            (x, y) = np.where(grids[t, :, :] == i)
+            (x, y) = np.where(grids[t, :, :] == i + 1)
             if len(x) == 0 or len(y) == 0:
                 raise ValueError(
-                    f"Agent {i} is missing in grid at time step {t}. Each agent must "
+                    f"Agent {i+1} is missing in grid at time step {t}. Each agent must "
                     "be present in each grid time step."
                 )
             elif len(x) > 1 or len(y) > 1:
                 raise ValueError(
-                    f"Agent {i} appears multiple times in grid at time step {t}. Each "
+                    f"Agent {i+1} appears multiple times in grid at time step {t}. Each "
                     "agent must appear at most once in each grid time step."
                 )
             paths[t, 0, i] = x[0]  # x-coordinate
@@ -104,14 +123,15 @@ def paths2grids(paths: np.ndarray) -> np.ndarray:
         for i in range(m):
             x_rank = np.where(sorted_x == i)[0][0]
             y_rank = np.where(sorted_y == i)[0][0]
-            grids[t, x_rank, y_rank] = i
+            grids[t, x_rank, y_rank] = i + 1
 
     # Consistency check: Ensure each agent appears exactly once in each grid time step
     for t in range(n):
         for i in range(m):
-            if np.sum(grids[t, :, :] == i) != 1:
+            if np.sum(grids[t, :, :] == i + 1) != 1:
                 raise ValueError(
-                    f"Agent {i} does not appear exactly once in grid at time step {t}."
+                    f"Agent {i+1} does not appear exactly once in "
+                    f"grid at time step {t}."
                 )
 
     # Return grid sequence
@@ -182,10 +202,15 @@ def paths2windings(
         upscaled_paths = np.zeros((new_n, 2, m), dtype=float)
         for i in range(m):
             if intermediate_shape == "linear":
-                upscaled_paths[:, :, i] = np.interp(
+                upscaled_paths[:, 0, i] = np.interp(
                     np.linspace(0, n - 1, new_n),
                     np.arange(n),
-                    paths[:, :, i].T,
+                    paths[:, 0, i].T,
+                ).T
+                upscaled_paths[:, 1, i] = np.interp(
+                    np.linspace(0, n - 1, new_n),
+                    np.arange(n),
+                    paths[:, 1, i].T,
                 ).T
             elif intermediate_shape == "spline":
                 cs_x = CubicSpline(np.arange(n), paths[:, 0, i])
@@ -210,7 +235,7 @@ def paths2windings(
         dx = paths[t, 0, :][np.newaxis, :] - paths[t, 0, :][:, np.newaxis]  # N×N
         dy = paths[t, 1, :][np.newaxis, :] - paths[t, 1, :][:, np.newaxis]  # N×N
         theta = np.arctan2(dy, dx)
-        delta_theta = theta - theta_prev
+        delta_theta = 1 / np.pi * angle_diff(theta, theta_prev)
 
         # Compute and store winding numbers for current time step
         windings[t, :, :] = windings[t - 1, :, :] + delta_theta
