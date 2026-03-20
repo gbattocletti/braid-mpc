@@ -13,15 +13,22 @@ if sys.platform.startswith("linux"):
 
 class Braidlab:
     def __init__(self):
+        self.engine: matlab.engine.MatlabEngine = None
         if sys.platform.startswith("linux"):
-            self.engine: matlab.engine.MatlabEngine = matlab.engine.start_matlab()
+            sessions = matlab.engine.find_matlab()
+            if sessions:
+                print(f"Connecting to existing MATLAB session: {sessions[0]}")
+                self.engine = matlab.engine.connect_matlab(sessions[0])
+            self.engine = matlab.engine.start_matlab()
         else:
             raise NotImplementedError(
                 "MATLAB functions are not supported on this platform due to the "
                 "dependency on the braidlab library."
             )
 
-    def paths2braid(self, paths: np.ndarray, angle: float) -> np.ndarray:
+    def paths2braid(
+        self, paths: np.ndarray, angle: float
+    ) -> tuple[np.ndarray, "matlab.object"]:
         """
         Convert paths to braids using the braidlab library in MATLAB.
 
@@ -33,6 +40,7 @@ class Braidlab:
 
         Returns:
             np.ndarray: A 1D array of shape representing the braid.
+            matlab.object: The braidlab braid object.
 
         Raises:
             TypeError: If the input 'paths' is not a numpy array.
@@ -57,13 +65,23 @@ class Braidlab:
         matlab_angle = float(angle)
 
         # Call the MATLAB function to convert paths to braids
-        # matlab_braid = self.engine.compact(
-        #     self.engine.braidlab.braid(matlab_paths, matlab_angle)
-        # )
-        # braid = np.array(self.engine.eval("matlab_braid.word", nargout=1))
         self.engine.cd(r"utils", nargout=0)
-        braid = np.array(
-            self.engine.paths2braid(matlab_paths, matlab_angle, nargout=1)
-        )[0]
+        braid_matlab, braid = self.engine.paths2braid(
+            matlab_paths, matlab_angle, nargout=2
+        )
+        braid = np.array(braid).flatten()
 
-        return braid
+        return braid, braid_matlab
+
+    def plot_braid(self, braid_matlab: "matlab.object") -> None:
+        """
+        Plot a braid using the braidlab library in MATLAB.
+
+        Args:
+            braid_matlab (matlab.object): The braidlab braid object to plot.
+
+        Returns:
+            None
+        """
+        # Plot the braid using the MATLAB function
+        self.engine.plot(braid_matlab, nargout=0)

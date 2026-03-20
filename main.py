@@ -22,7 +22,8 @@ plot.plot_windings(windings_spline, show=False)
 
 # Compute braid representations
 b = braidlab.Braidlab()
-braid = b.paths2braid(paths, angle=0 * np.pi / 180)
+braid, braid_matlab = b.paths2braid(paths, angle=0 * np.pi / 180)
+b.plot_braid(braid_matlab)
 print("Braid representation:", braid)
 
 # Show all plots
