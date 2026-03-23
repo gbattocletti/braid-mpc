@@ -70,8 +70,8 @@ def grids2paths(grids: np.ndarray) -> np.ndarray:
                 )
             elif len(x) > 1 or len(y) > 1:
                 raise ValueError(
-                    f"Agent {i+1} appears multiple times in grid at time step {t}. Each "
-                    "agent must appear at most once in each grid time step."
+                    f"Agent {i+1} appears multiple times in grid at time step {t}. "
+                    "Each agent must appear at most once in each grid time step."
                 )
             paths[t, 0, i] = x[0]  # x-coordinate
             paths[t, 1, i] = y[0]  # y-coordinate
@@ -172,9 +172,6 @@ def paths2windings(
         ValueError: If 'intermediate_shape' is not 'linear' or 'spline'.
 
     Notes:
-        - The winding numbers are multiplied by 2 to make so that they are integers at
-          the end of each timestep (i.e., when they are topological invariants for the
-          braids corresponding to the input paths).
         - If using the 'spline' interpolation method for upscaling, the resuling paths
           may not correspond to the same braid as the original paths, since the spline
           interpolation can introduce additional crossings between agents.
@@ -235,7 +232,7 @@ def paths2windings(
         dx = paths[t, 0, :][np.newaxis, :] - paths[t, 0, :][:, np.newaxis]  # N×N
         dy = paths[t, 1, :][np.newaxis, :] - paths[t, 1, :][:, np.newaxis]  # N×N
         theta = np.arctan2(dy, dx)
-        delta_theta = 1 / np.pi * angle_diff(theta, theta_prev)
+        delta_theta = 1 / (2 * np.pi) * angle_diff(theta, theta_prev)
 
         # Compute and store winding numbers for current time step
         windings[t, :, :] = windings[t - 1, :, :] + delta_theta
