@@ -1,3 +1,5 @@
+import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -20,11 +22,12 @@ windings_spline = invariants.paths2windings(
 )
 plot.plot_windings(windings_spline, show=False)
 
-# Compute braid representations
-b = braidlab.Braidlab()
-braid, braid_matlab = b.paths2braid(paths, angle=0 * np.pi / 180)
-b.plot_braid(braid_matlab)
-print("Braid representation:", braid)
+# Compute braid representations (only supported on linux)
+if sys.platform.startswith("linux"):
+    b = braidlab.Braidlab()
+    braid, braid_matlab = b.paths2braid(paths, angle=0 * np.pi / 180)
+    b.plot_braid(braid_matlab)
+    print("Braid representation:", braid)
 
 # Show all plots
 plt.show()
