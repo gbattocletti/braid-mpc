@@ -1,4 +1,5 @@
-%% Test grids -> paths conversion
+%% Test braid conjugacy
+% 5 agents with looser permutation rules
 
 clear variables;
 close all;

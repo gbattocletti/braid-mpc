@@ -1,5 +1,5 @@
 %% Test braid conjugacy
-% Simplest case with 2 agents
+% Case with 3 agents
 
 clear variables;
 close all;
@@ -9,39 +9,76 @@ clc;
 import braidlab.*
 
 %% Define paths
-n = 7;  % number of timesteps 
-m = 2;  % number of agents
+n = 13;  % number of timesteps 
+m = 3;  % number of agents
 time = linspace(0, n-1, n);  % normalized time vector
 
 % Space-time coordinates ([x, y] over time)
 grids = zeros(n, m, m);
 grids(1, :, :) = [
-            [0, 2];
-            [1, 0];
+            [0, 2, 0];
+            [0, 0, 3];
+            [1, 0, 0];
         ];
 grids(2, :, :) = [
-            [2, 0];
-            [0, 1];
+            [2, 0, 0];
+            [0, 0, 3];
+            [0, 1, 0];
         ];
 grids(3, :, :) = [
-            [0, 1];
-            [2, 0];
+            [2, 0, 0];
+            [0, 3, 0];
+            [0, 0, 1];
         ];
 grids(4, :, :) = [
-            [1, 0];
-            [0, 2];
+            [0, 3, 0];
+            [2, 0, 0];
+            [0, 0, 1];
         ];
 grids(5, :, :) = [
-            [0, 2];
-            [1, 0];
+            [0, 3, 0];
+            [0, 0, 1];
+            [2, 0, 0];
         ];
 grids(6, :, :) = [
-            [2, 0];
-            [0, 1];
+            [0, 0, 1];
+            [0, 3, 0];
+            [2, 0, 0];
         ];
 grids(7, :, :) = [
-            [0, 2];
-            [1, 0];
+            [0, 1, 0];
+            [0, 0, 3];
+            [2, 0, 0];
+        ];
+grids(8, :, :) = [
+            [1, 0, 0];
+            [0, 0, 3];
+            [0, 2, 0];
+        ];
+grids(9, :, :) = [
+            [1, 0, 0];
+            [0, 3, 0];
+            [0, 0, 2];
+        ];
+grids(10, :, :) = [
+            [1, 0, 0];
+            [0, 0, 2];
+            [0, 3, 0];
+        ];
+grids(11, :, :) = [
+            [0, 0, 2];
+            [1, 0, 0];
+            [0, 3, 0];
+        ];
+grids(12, :, :) = [
+            [0, 0, 2];
+            [0, 3, 0];
+            [1, 0, 0];
+        ];
+grids(13, :, :) = [
+            [0, 2, 0];
+            [0, 0, 3];
+            [1, 0, 0];
         ];
 
 %% Plot paths
