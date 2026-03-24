@@ -18,7 +18,8 @@ class Agent:
         self.dt: float | None = None  # time step
 
         # Agent state info
-        self.x: np.ndarray | None = None  # current state of the agent (initial state)
+        self.x: np.ndarray | None = None  # current state of the agent
+        self.x_init: np.ndarray | None = None  # initial state of the agent
         self.x_goal: np.ndarray | None = None  # goal state of the agent
         self.x_pred: np.ndarray | None = None  # agent's predicted trajectory
 
