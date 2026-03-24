@@ -20,4 +20,9 @@ function sorted_indices = project_points(points, angle_rad)
     % Sort by absolute value (distance from origin along the axis)
     [~, sorted_indices] = sort(abs(projections));
 
+    if angle_rad >= 0
+        % indexes are already in the right order
+    elseif angle_rad < 0
+        sorted_indices = flip(sorted_indices);
+    end
 end
