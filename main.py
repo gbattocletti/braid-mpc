@@ -1,3 +1,4 @@
+import shutil
 import sys
 
 import matplotlib.pyplot as plt
@@ -23,7 +24,7 @@ windings_spline = invariants.paths2windings(
 plot.plot_windings(windings_spline, show=False)
 
 # Compute braid representations (only supported on linux)
-if sys.platform.startswith("linux"):
+if sys.platform.startswith("linux") and shutil.which("matlab") is not None:
     b = braidlab.Braidlab()
     braid, braid_matlab = b.paths2braid(paths, angle=0 * np.pi / 180)
     b.plot_braid(braid_matlab)

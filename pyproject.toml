@@ -9,11 +9,13 @@ dependencies = [
     "numpy>=2.4.3",
     "scipy>=1.17.1",
     "pyqt5>=5.15.11; sys_platform == 'linux'",
-    "matlabengine>=25.2.2; sys_platform == 'linux'",
     "casadi>=3.7.2",
 ]
 
 [project.optional-dependencies]
+matlab = [
+    "matlabengine>=25.2.2; sys_platform == 'linux'",
+]
 dev = [
     "black>=26.3.1",
     "isort>=8.0.1",

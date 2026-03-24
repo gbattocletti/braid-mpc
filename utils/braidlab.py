@@ -2,13 +2,18 @@
 Utility functions to use the MATLAB engine and the braidlab library within it.
 """
 
+import shutil
 import sys
 
 import numpy as np
 
-if sys.platform.startswith("linux"):
-    import matlab
-    import matlab.engine
+if sys.platform.startswith("linux") and shutil.which("matlab") is not None:
+    try:
+        import matlab
+        import matlab.engine
+    except ImportError as e:
+        # MATLAB found but engine not installed
+        raise ImportError("MATLAB found but matlab engine not installed") from e
 
 
 class Braidlab:

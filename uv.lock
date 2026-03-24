@@ -40,7 +40,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "casadi" },
-    { name = "matlabengine", marker = "sys_platform == 'linux'" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pyqt5", marker = "sys_platform == 'linux'" },
@@ -52,19 +51,22 @@ dev = [
     { name = "black" },
     { name = "isort" },
 ]
+matlab = [
+    { name = "matlabengine", marker = "sys_platform == 'linux'" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=26.3.1" },
     { name = "casadi", specifier = ">=3.7.2" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=8.0.1" },
-    { name = "matlabengine", marker = "sys_platform == 'linux'", specifier = ">=25.2.2" },
+    { name = "matlabengine", marker = "sys_platform == 'linux' and extra == 'matlab'", specifier = ">=25.2.2" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.4.3" },
     { name = "pyqt5", marker = "sys_platform == 'linux'", specifier = ">=5.15.11" },
     { name = "scipy", specifier = ">=1.17.1" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["matlab", "dev"]
 
 [[package]]
 name = "casadi"
