@@ -1,3 +1,5 @@
+import warnings
+
 import casadi as ca
 import numpy as np
 
@@ -175,29 +177,66 @@ class CentralizedMPC(MPC):
         **kwargs,
     ) -> ca.OptiSol:
         """
-        Solve the NMPC problem.
-
-        Args:
-            x_0 (np.ndarray): initial state of the ego agent (n_x, )
-            x_goal (np.ndarray): goal state of the ego agent (n_x, )
-            x_pred (list[np.ndarray]): predicted states of agents (m-1, n_x, K+1)
-            w_curr (np.ndarray): current winding number w.r.t. agents (m-1, )
-            w_target (np.ndarray): target winding number w.r.t. agents (m-1, )
-            use_warm_start (bool, optional): whether to use the previous solution for
-                warm starting
-            sol_prev (ca.OptiSol | None, optional): previous solution for warm starting
-            **kwargs: Additional keyword arguments
-        Returns:
-            sol (ca.OptiSol): solution of the OCP
-
-        Raises:
-            RuntimeError: if the OCP has not been initialized yet.
-            ValueError: if the input arguments have incorrect shapes.
-            ValueError: if use_warm_start is True but sol is not provided.
-            RuntimeError: if the OCP solver fails to find a solution.
+        Solve the MPC problem for the centralized MPC architecture.
         """
-        # TODO
-        pass
+        # Validate inputs
+        if x_0.shape != (self.n_x, self.m):
+            raise ValueError(
+                f"x_0 must have shape ({self.n_x}, {self.m}), " f"but got {x_0.shape}."
+            )
+        if x_goal.shape != (self.n_x, self.m):
+            raise ValueError(
+                f"x_goal must have shape ({self.n_x}, {self.m}), "
+                f"but got {x_goal.shape}."
+            )
+        if w_curr.shape != (self.m, self.m):
+            raise ValueError(
+                f"w_curr must have shape ({self.m}, {self.m}), but got {w_curr.shape}."
+            )
+        if w_target.shape != (self.m, self.m):
+            raise ValueError(
+                f"w_target must have shape ({self.m}, {self.m}), "
+                f"but got {w_target.shape}."
+            )
+        if sol_prev is not None and not isinstance(sol_prev, ca.OptiSol):
+            raise ValueError(
+                "sol_prev must be of type casadi.OptiSol or None, but got "
+                f"{type(sol_prev)}."
+            )
+        if sol_prev is not None and sol_prev is None:
+            raise ValueError("use_warm_start is True but sol_prev was not provided.")
+
+        # Parse kwargs
+        x_pred = kwargs.get("x_pred", None)
+        if x_pred is not None:
+            warnings.warn(
+                "x_pred is provided but is not used in the centralized MPC "
+                "formulation. The x_pred argument will be ignored."
+            )
+
+        # Set parameters in OCP
+        self.ocp.set_value(self.x_0, x_0)
+        self.ocp.set_value(self.x_goal, x_goal)
+        self.ocp.set_value(self.w_curr, w_curr)
+        self.ocp.set_value(self.w_target, w_target)
+
+        # Warm start
+        if use_warm_start is True and sol_prev is not None:
+            self.ocp.set_initial(sol_prev.value_variables())
+        elif self.sol is None:
+            # warm start on 1st solution to avoid numerical errors
+            # See: https://github.com/casadi/casadi/discussions/3539
+            # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-"NaN-detected"in-my-optimization%3F  # pylint: disable=line-too-long
+            for i in range(self.m):
+                for k in range(self.K + 1):
+                    self.ocp.set_initial(self.x[k, :, i], x_0)
+        else:
+            # No warm start
+            # CHECKME: check if this case leads to issues
+            pass
+
+        # Solve OCP and return solution object
+        return self.ocp.solve()
 
     def _check_cost(self) -> tuple[float, float, float, float]:
         """
