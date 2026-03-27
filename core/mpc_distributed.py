@@ -23,8 +23,8 @@ class DistributedMPC(MPC):
         Initialize the local OCP problem for the distributed MPC architecture.
         """
         # Initialize optimization variables
-        self.x = self.ocp.variable(self.n_x, self.K + 1)  # state trajectory (n_x, K+1)
-        self.u = self.ocp.variable(self.n_u, self.K)  # control input (n_u, K)
+        self.x = self.ocp.variable(self.K + 1, self.n_x)  # state trajectory (K+1, n_x)
+        self.u = self.ocp.variable(self.K, self.n_u)  # control input (K, n_u)
 
         # Initialize OCP parameters
         # NOTE: in the distributed case, the list of predicted states of the agents,
@@ -35,39 +35,39 @@ class DistributedMPC(MPC):
         self.x_goal = self.ocp.parameter(self.n_x)
         self.w_curr = self.ocp.parameter(self.m - 1)
         self.w_target = self.ocp.parameter(self.m - 1)
-        self.x_pred = [self.ocp.parameter(self.n_x, self.K) for _ in range(self.m - 1)]
+        self.x_pred = [self.ocp.parameter(self.K, self.n_x) for _ in range(self.m - 1)]
 
         # Constraints
         # Initial state constraint
-        self.ocp.subject_to(self.x[:, 0] == self.x_0)
+        self.ocp.subject_to(self.x[0, :] == self.x_0)
 
         # Dynamics
         for k in range(self.K):
-            x_next = self.x[:, k] + self._dxdt(self.u[:, k]) * self.dt
-            self.ocp.subject_to(self.x[:, k + 1] == x_next)
+            x_next = self.x[k, :] + self.dxdt(self.u[k, :]) * self.dt
+            self.ocp.subject_to(self.x[k + 1, :] == x_next)
 
         # State constraints
         if self.x_min is not None and self.x_max is not None:
             for k in range(self.K + 1):
-                self.ocp.subject_to(self.x_min <= self.x[:, k])
-                self.ocp.subject_to(self.x[:, k] <= self.x_max)
+                self.ocp.subject_to(self.x_min <= self.x[k, :])
+                self.ocp.subject_to(self.x[k, :] <= self.x_max)
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:
             for k in range(self.K):
-                self.ocp.subject_to(self.u_min <= self.u[:, k])
-                self.ocp.subject_to(self.u[:, k] <= self.u_max)
+                self.ocp.subject_to(self.u_min <= self.u[k, :])
+                self.ocp.subject_to(self.u[k, :] <= self.u_max)
 
         # Input rate constraints
         if self.u_rate_min is not None and self.u_rate_max is not None:
             for k in range(self.K - 1):
-                self.ocp.subject_to(self.u_rate_min <= self.u[:, k + 1] - self.u[:, k])
-                self.ocp.subject_to(self.u[:, k + 1] - self.u[:, k] <= self.u_rate_max)
+                self.ocp.subject_to(self.u_rate_min <= self.u[k + 1, :] - self.u[k, :])
+                self.ocp.subject_to(self.u[k + 1, :] - self.u[k, :] <= self.u_rate_max)
 
         # Total input constraints
         if self.u_tot_max is not None:
             for k in range(self.K):
-                self.ocp.subject_to(ca.norm_1(self.u[:, k]) <= self.u_tot_max)
+                self.ocp.subject_to(ca.norm_1(self.u[k, :]) <= self.u_tot_max)
 
         # Collision avoidance constraints
         # NOTE: the distance constraint is only computed w.r.t. other agents, and not
@@ -75,7 +75,7 @@ class DistributedMPC(MPC):
         if self.d_min is not None:
             for j in range(self.m - 1):
                 for k in range(self.K + 1):
-                    dist = ca.norm_2(self.x[:, k] - self.x_pred[j][:, k])
+                    dist = ca.norm_2(self.x[k, :] - self.x_pred[j][k, :])
                     self.ocp.subject_to(dist >= self.d_min)
 
         # Cost function
@@ -85,15 +85,26 @@ class DistributedMPC(MPC):
         if self.alpha_g is not None and self.alpha_g > 0:
             for k in range(self.K + 1):
                 self.cost_function += self.alpha_g * (
-                    (self.x[0, k] - self.x_goal[0]) ** 2
-                    + (self.x[1, k] - self.x_goal[1]) ** 2
+                    (self.x[k, 0] - self.x_goal[0]) ** 2
+                    + (self.x[k, 1] - self.x_goal[1]) ** 2
                 )
+
+        # Terminal goal tracking cost
+        if self.alpha_g_terminal is not None and self.alpha_g_terminal > 0:
+            delta_goal = (
+                (self.x[self.K, 0] - self.x_goal[0]) ** 2
+                + (self.x[self.K, 1] - self.x_goal[1]) ** 2
+            ) - (
+                (self.x[0, 0] - self.x_goal[0]) ** 2
+                + (self.x[0, 1] - self.x_goal[1]) ** 2
+            )
+            self.cost_function += self.alpha_g_terminal * delta_goal
 
         # Control input cost
         if self.alpha_u is not None and self.alpha_u > 0:
             for k in range(self.K):
                 self.cost_function += self.alpha_u * (
-                    self.u[:, k].T @ self.R @ self.u[:, k]
+                    self.u[k, :].T @ self.R @ self.u[k, :]
                 )
 
         # Winding cost
@@ -115,12 +126,12 @@ class DistributedMPC(MPC):
                 w = self.w_curr[j]
                 for k in range(1, self.K + 1):
                     theta: ca.SX | ca.MX = ca.atan2(
-                        self.x[1, k] - self.x_pred[j][1, k],
-                        self.x[0, k] - self.x_pred[j][0, k],
+                        self.x[k, 1] - self.x_pred[j][k, 1],
+                        self.x[k, 0] - self.x_pred[j][k, 0],
                     )
                     theta_prev: ca.SX | ca.MX = ca.atan2(
-                        self.x[1, k - 1] - self.x_pred[j][1, k - 1],
-                        self.x[0, k - 1] - self.x_pred[j][0, k - 1],
+                        self.x[k - 1, 1] - self.x_pred[j][k - 1, 1],
+                        self.x[k - 1, 0] - self.x_pred[j][k - 1, 0],
                     )
                     w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
