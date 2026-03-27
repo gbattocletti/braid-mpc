@@ -21,6 +21,9 @@ class MPC:
         self.K: int | None = None  # prediction horizon
         self.m: int | None = None  # number of agents
 
+        # Flag for OCP cost function
+        self.winding_aware: bool = True  # whether to include winding cost in OCP
+
         # Optimization problem
         self.ocp: ca.Opti = ca.Opti()
         self.ocp_ready: bool = False  # flag to check if the OCP is initialized
@@ -119,13 +122,15 @@ class MPC:
         """
         return ca.atan2(ca.sin(angle_1 - angle_2), ca.cos(angle_1 - angle_2))
 
-    def initialize_ocp(self) -> None:
+    def initialize_ocp(self, winding_aware: bool = True) -> None:
         """
         Initialize the optimal control problem (OCP) for the MPC controller. This method
         should be called before calling the `solve` method for the first time.
 
         Args:
-            None
+            winding_aware (bool, optional): whether to include the winding cost in the
+                OCP. Default is True. If False, the OCP will be initialized without the
+                winding cost.
 
         Returns:
             None
@@ -137,6 +142,19 @@ class MPC:
         if self.ocp_ready:
             raise RuntimeError("The OCP has already been initialized.")
 
+        # Validate inputs
+        if not isinstance(winding_aware, bool):
+            raise ValueError(
+                f"winding_aware must be a boolean, but got {type(winding_aware)}."
+            )
+        else:
+            self.winding_aware = winding_aware
+
+        # Check winding-aware flag
+        # If MPC is not winding-aware, set the weight to 0 and skip winding cost
+        if self.winding_aware is False:
+            self.alpha_w = 0
+
         # Initialize optimization variables
         self.x = self.ocp.variable(self.n_x, self.K + 1)  # state trajectory (n_x, K+1)
         self.u = self.ocp.variable(self.n_u, self.K)  # control input (n_u, K)
@@ -144,9 +162,11 @@ class MPC:
         # Initialize OCP parameters
         self.x_0 = self.ocp.parameter(self.n_x)
         self.x_goal = self.ocp.parameter(self.n_x)
-        self.w_curr = self.ocp.parameter(self.m, self.n_x)
-        self.w_target = self.ocp.parameter(self.m, self.n_x)
-        self.x_pred = [self.ocp.parameter(self.n_x, self.K + 1) for _ in range(self.m)]
+        self.w_curr = self.ocp.parameter(self.m - 1)
+        self.w_target = self.ocp.parameter(self.m - 1)
+        self.x_pred = [
+            self.ocp.parameter(self.n_x, self.K + 1) for _ in range(self.m - 1)
+        ]
 
         # Constraints
         # Initial state constraint
@@ -215,6 +235,7 @@ class MPC:
             for j in range(self.m - 1):
 
                 # Get weight for agent j
+                alpha_w_j: float
                 if isinstance(self.alpha_w, np.ndarray):
                     self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
                     alpha_w_j = self.alpha_w[j]
