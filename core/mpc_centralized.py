@@ -6,14 +6,14 @@ from core.mpc import MPC
 
 class CentralizedMPC(MPC):
     """
-    Centralized MPC controller class. The main structure of the class and of the OCP
-    formulation is the same as for the base MPC class, but the OCP is formulated in a
-    centralized way, meaning that the cost, dynamics, and constraints, of all the agents
-    are included in a single optimization problem. This also means that, differently
-    from the local MPC controller, the variables and parameters of this class contain
-    the data for all the agents, and thus tehy have an extra dimension of length m
-    (number of agents).
+    Centralized MPC controller class.
 
+    The main structure of the class and of the OCP formulation is the same as for the
+    base MPC class, but the OCP is formulated in a centralized way, meaning that the
+    cost, dynamics, and constraints, of all the agents are included in a single
+    optimization problem. This also means that, differently from the local MPC
+    controller, the variables and parameters of this class contain the data for all the
+    agents, and thus tehy have an extra dimension of length m(number of agents).
     Additionally, the centralized OCP does not need the predicted trajectories of the
     other agents, as all the trajectories are optimized simultaneously.
     """
@@ -25,35 +25,134 @@ class CentralizedMPC(MPC):
 
     def _initialize_ocp(self) -> None:
         """
-        Initialize the centralized optimal control problem (OCP) for the centralized MPC
-        controller. This method must be called before calling the `solve` method for the
-        first time.
-
-        Args:
-            None
-
-        Returns:
-            None
-
-        Raises:
-            RuntimeError: if the OCP has already been initialized.
+        Initialize the centralized OCP problem for the centralized MPC architecture.
         """
-
         # Initialize optimization variables
-        self.x = self.ocp.variable(self.n_x, self.K + 1, self.m)
-        self.u = self.ocp.variable(self.n_u, self.K, self.m)
+        self.x = self.ocp.variable(self.K + 1, self.n_x, self.m)
+        self.u = self.ocp.variable(self.K, self.n_u, self.m)
 
         # Initialize OCP parameters
-        self.x_0 = self.ocp.parameter(self.m, self.n_x)
-        self.x_goal = self.ocp.parameter(self.m, self.n_x)
+        self.x_0 = self.ocp.parameter(self.n_x, self.m)
+        self.x_goal = self.ocp.parameter(self.n_x, self.m)
         self.w_curr = self.ocp.parameter(self.m, self.m)
         self.w_target = self.ocp.parameter(self.m, self.m)
 
         # Constraints
         # Initial state constraint
-        self.ocp.subject_to(self.x[:, 0, :] == self.x_0)  # CHECKME: is reshape needed?
+        self.ocp.subject_to(self.x[0, :, :] == self.x_0)
 
-        # TODO
+        # Dynamics
+        for k in range(self.K):
+            for i in range(self.m):
+                x_next = self.x[k, :, i] + self.dxdt(self.u[k, :, i]) * self.dt
+                self.ocp.subject_to(self.x[k + 1, :, i] == x_next)
+
+        # State constraints
+        if self.x_min is not None and self.x_max is not None:
+            for k in range(self.K + 1):
+                for i in range(self.m):
+                    self.ocp.subject_to(self.x_min <= self.x[k, :, i])
+                    self.ocp.subject_to(self.x[k, :, i] <= self.x_max)
+
+        # Input constraints
+        if self.u_min is not None and self.u_max is not None:
+            for i in range(self.m):
+                for k in range(self.K):
+                    self.ocp.subject_to(self.u_min <= self.u[k, :, i])
+                    self.ocp.subject_to(self.u[k, :, i] <= self.u_max)
+
+        # Input rate constraints
+        # NOTE: the previous u (i.e., the one applied at the previous time step) should
+        # also be taken into account to constraint u[0], but for simplicity we only
+        # constraint the rate between the optimization variables (at least for now).
+        if self.u_rate_min is not None and self.u_rate_max is not None:
+            for i in range(self.m):
+                for k in range(self.K - 1):
+                    self.ocp.subject_to(
+                        self.u_rate_min <= self.u[k + 1, :, i] - self.u[k, :, i]
+                    )
+                    self.ocp.subject_to(
+                        self.u[k + 1, :, i] - self.u[k, :, i] <= self.u_rate_max
+                    )
+
+        # Total input constraints
+        if self.u_tot_max is not None:
+            for i in range(self.m):
+                for k in range(self.K):
+                    self.ocp.subject_to(ca.norm_1(self.u[k, :, i]) <= self.u_tot_max)
+
+        # Collision avoidance constraints
+        if self.d_min is not None:
+            for i in range(self.m):
+                for j in range(self.m):
+                    if i == j:
+                        continue  # skip self-collision
+                    for k in range(self.K + 1):
+                        dist = ca.norm_2(self.x[k, :, i] - self.x[k, :, j])
+                        self.ocp.subject_to(dist >= self.d_min)
+
+        # Cost function
+        self.cost_function = 0
+
+        # Goal tracking cost
+        if self.alpha_g is not None and self.alpha_g > 0:
+            for i in range(self.m):
+                for k in range(self.K + 1):
+                    self.cost_function += self.alpha_g * (
+                        (self.x[k, 0, i] - self.x_goal[0, i]) ** 2
+                        + (self.x[k, 1, i] - self.x_goal[1, i]) ** 2
+                    )
+
+        # Terminal goal tracking cost
+        if self.alpha_g_terminal is not None and self.alpha_g_terminal > 0:
+            for i in range(self.m):
+                delta_goal: float = (
+                    (self.x[self.K, 0, i] - self.x_goal[0, i]) ** 2
+                    + (self.x[self.K, 1, i] - self.x_goal[1, i]) ** 2
+                ) - (
+                    (self.x[0, 0, i] - self.x_goal[0, i]) ** 2
+                    + (self.x[0, 1, i] - self.x_goal[1, i]) ** 2
+                )
+                self.cost_function += self.alpha_g_terminal * delta_goal
+
+        # Control input cost
+        if self.alpha_u is not None and self.alpha_u > 0:
+            for i in range(self.m):
+                for k in range(self.K):
+                    self.cost_function += self.alpha_u * (
+                        self.u[k, :, i] @ self.R @ self.u[k, :, i].T
+                    )
+
+        # Winding cost
+        if self.alpha_w is not None and np.any(self.alpha_w > 0):
+            for i in range(self.m):
+                for j in range(self.m):
+                    if i == j:
+                        continue  # skip self-winding
+
+                    # Get weight for agent i w.r.t. agent j
+                    alpha_w_ij: float
+                    if isinstance(self.alpha_w, np.ndarray):
+                        self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
+                        alpha_w_ij = self.alpha_w[i, j]
+                    else:
+                        alpha_w_ij = self.alpha_w
+
+                    # Compute winding number w.r.t. j at the end of prediction horizon
+                    w = self.w_curr[j]
+                    for k in range(1, self.K + 1):
+                        theta: ca.SX | ca.MX = ca.atan2(
+                            self.x[k, 1, i] - self.x[k, 1, j],
+                            self.x[k, 0, i] - self.x[k, 0, j],
+                        )
+                        theta_prev: ca.SX | ca.MX = ca.atan2(
+                            self.x[k - 1, 1, i] - self.x[k - 1, 1, j],
+                            self.x[k - 1, 0, i] - self.x[k - 1, 0, j],
+                        )
+                        w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
+
+                    # Add winding cost to the total cost function
+                    self.cost_function += alpha_w_ij * (self.w_target[i][j] - w) ** 2
 
         # Define the objective
         self.ocp.minimize(self.cost_function)

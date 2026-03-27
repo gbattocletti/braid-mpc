@@ -59,6 +59,7 @@ class MPC(ABC):
         # Cost function weights and matrices
         self.alpha_u: float | None = None  # control input cost weight
         self.alpha_g: float | None = None  # goal cost weight
+        self.alpha_g_terminal: float | None = None  # weight for terminal goal tracking
         self.alpha_w: np.ndarray | float | None = None  # winding cost weight
         self.R: np.ndarray | None = None  # control input cost matrix
 
