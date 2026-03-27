@@ -160,29 +160,6 @@ class DistributedMPC(MPC):
     ) -> ca.OptiSol:
         """
         Solve the MPC problem for the distributed MPC architecture.
-
-        Note: This methods requires the extra input `x_pred`, which is a list of the
-        predicted state trajectories of the other agents, passed as a kwarg parameter.
-
-        Args:
-            x_0 (np.ndarray): initial state of the ego agent (n_x, )
-            x_goal (np.ndarray): goal state of the ego agent (n_x, )
-            x_pred (list[np.ndarray]): predicted states of agents (m-1, n_x, K+1)
-            w_curr (np.ndarray): current winding number w.r.t. agents (m-1, )
-            w_target (np.ndarray): target winding number w.r.t. agents (m-1, )
-            use_warm_start (bool, optional): whether to use the previous solution for
-                warm starting
-            sol_prev (ca.OptiSol | None, optional): previous solution for warm starting
-            **kwargs: Additional keyword arguments
-
-        Returns:
-            sol (ca.OptiSol): solution of the OCP
-
-        Raises:
-            RuntimeError: if the OCP has not been initialized yet.
-            ValueError: if the input arguments have incorrect shapes.
-            ValueError: if use_warm_start is True but sol is not provided.
-            RuntimeError: if the OCP solver fails to find a solution.
         """
         # Validate inputs
         if x_0.shape != (self.n_x,):
@@ -196,9 +173,9 @@ class DistributedMPC(MPC):
                 f"x_pred must be a list of length {self.m - 1}, but got {len(x_pred)}."
             )
         for j, x_pred_j in enumerate(x_pred):
-            if x_pred_j.shape != (self.n_x, self.K + 1):
+            if x_pred_j.shape != (self.K + 1, self.n_x):
                 raise ValueError(
-                    f"x_pred[{j}] must have shape ({self.n_x}, {self.K + 1}), "
+                    f"x_pred[{j}] must have shape ({self.K + 1}, {self.n_x}), "
                     f"got {x_pred_j.shape} instead."
                 )
         if w_curr.shape != (self.m - 1,):
@@ -227,12 +204,12 @@ class DistributedMPC(MPC):
                 f"{type(x_pred_kwarg)} with length {len(x_pred_kwarg)}."
             )
         elif any(
-            not isinstance(x_pred_j, np.ndarray) or x_pred_j.shape != (self.n_x, self.K)
+            not isinstance(x_pred_j, np.ndarray) or x_pred_j.shape != (self.K, self.n_x)
             for x_pred_j in x_pred_kwarg
         ):
             raise ValueError(
                 "x_pred must be a list of numpy arrays with shape "
-                f"({self.n_x}, {self.K + 1}), but got {type(x_pred_kwarg)} with "
+                f"({self.K}, {self.n_x}), but got {type(x_pred_kwarg)} with "
                 f"elements of shape {x_pred_kwarg[0].shape}."
             )
 
@@ -252,7 +229,7 @@ class DistributedMPC(MPC):
             # See: https://github.com/casadi/casadi/discussions/3539
             # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-"NaN-detected"in-my-optimization%3F  # pylint: disable=line-too-long
             for k in range(self.K + 1):
-                self.ocp.set_initial(self.x[:, k], x_0)
+                self.ocp.set_initial(self.x[k, :], x_0)
         else:
             # No warm start
             # CHECKME: check if this case leads to issues
@@ -303,14 +280,14 @@ class DistributedMPC(MPC):
         if self.alpha_g is not None and self.alpha_g > 0:
             for k in range(self.K + 1):
                 goal_cost += self.alpha_g * (
-                    (x[0, k] - x_goal[0]) ** 2 + (x[1, k] - x_goal[1]) ** 2
+                    (x[k, 0] - x_goal[0]) ** 2 + (x[k, 1] - x_goal[1]) ** 2
                 )
 
         # Control input cost
         control_cost = 0
         if self.alpha_u is not None and self.alpha_u > 0:
             for k in range(self.K):
-                control_cost += self.alpha_u * (u[:, k].T @ self.R @ u[:, k])
+                control_cost += self.alpha_u * (u[k, :] @ self.R @ u[k, :].T)
 
         # Winding cost
         winding_cost = 0
@@ -328,12 +305,12 @@ class DistributedMPC(MPC):
                 w: float = w_curr[j]
                 for k in range(1, self.K + 1):
                     theta: float = np.atan2(
-                        x[1, k] - x_pred[j][1, k],
-                        x[0, k] - x_pred[j][0, k],
+                        x[k, 1] - x_pred[j][k, 1],
+                        x[k, 0] - x_pred[j][k, 0],
                     )
                     theta_prev: float = np.atan2(
-                        x[1, k - 1] - x_pred[j][1, k - 1],
-                        x[0, k - 1] - x_pred[j][0, k - 1],
+                        x[k - 1, 1] - x_pred[j][k - 1, 1],
+                        x[k - 1, 0] - x_pred[j][k - 1, 0],
                     )
                     w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
 
