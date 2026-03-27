@@ -58,11 +58,36 @@ for i in range(m):
     M[i].x_pred = np.zeros([m, m, K])
 
 # Initialize MPC controller
-mpc = mpc.MPC()
-mpc.dt = dt
-mpc.K = K
+controller = mpc.MPC()
+controller.dt = dt
+controller.K = K
+controller.m = m
+controller.alpha_u = 1.0
+controller.alpha_goal = 1.0
+controller.alpha_w = 1.0
+controller.R = np.diagonal([1, 1])
+
+# TODO: check values against robotarium
+controller.u_min = np.array([-1, -1])
+controller.u_max = np.array([1, 1])
+controller.x_min = np.array([-10, -10])
+controller.x_max = np.array([10, 10])
+controller.d_min = 0.2
 
 # Main simulation loop
+T = 50  # total simulation time (s)
+time = np.arange(0, T, dt)
+for t in time:
+
+    # Collect predicted trajectories from all agents
+
+    # Compute control inputs for all agents
+    for i in range(m):
+        agent = M[i]
+        # controller.solve()  # TODO
+
+    # Update agents' states based on control inputs
+
 
 # Show all plots
 plt.show()
