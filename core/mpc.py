@@ -144,25 +144,40 @@ class MPC(ABC):
             "The _initialize_ocp() method must be implemented in a subclass of MPC."
         )
 
-    @abstractmethod
-    def _dxdt(
+    def dxdt(
         self,
         u: ca.SX | ca.MX,
     ) -> ca.SX | ca.MX:
         """
-        Continuous-time dynamics function for the MPC controller.
-        The dynamics are defined as:
+        Continuous-time dynamics function of a single robot. The dynamics return the
+        continuous state derivative, which can then be integrated numerically in the MPC
+        prediction model. The dynamics are defined as:
             dxdt = f(x, u)
 
+        The state is structured as:
+            x = [x, y]^T
+
+        The control input is structured as:
+            u = [u_x, u_y]^T
+
         Args:
+            x (ca.SX or ca.MX): State vector (n_x, ).
             u (ca.SX or ca.MX): Control input vector (n_u, ).
 
         Returns:
             dxdt (ca.SX or ca.MX): Time derivative of the state vector (n_x, ).
         """
-        raise NotImplementedError(
-            "The _dxdt() method must be implemented in a subclass of MPC."
-        )
+        # Validate input dimensions
+        if u.shape != (self.n_u,):
+            raise ValueError(f"u must have shape ({self.n_u},), but got {u.shape}.")
+
+        # Compute the state derivative based on the control input.
+        dx = u[0]  # x_dot = u_x
+        dy = u[1]  # y_dot = u_y
+        dxdt = ca.vertcat(dx, dy)
+
+        # Return the state derivative
+        return dxdt
 
     def solve(
         self,

@@ -64,34 +64,6 @@ class CentralizedMPC(MPC):
         # Set ready flag to true
         self.ocp_ready = True
 
-    def _dxdt(
-        self,
-        u: ca.SX | ca.MX,
-    ) -> ca.SX | ca.MX:
-        """
-        Continuous-time dynamics function for the MPC controller. To be integrated
-        numerically within the MPC prediction model. The dynamics are defined as:
-            dxdt = f(x, u)
-
-        The state is structured as:
-            x = [x, y]^T
-
-        The control input is structured as:
-            u = [u_x, u_y]^T
-
-        Args:
-            x (ca.SX or ca.MX): State vector (n_x, ).
-            u (ca.SX or ca.MX): Control input vector (n_u, ).
-
-        Returns:
-            dxdt (ca.SX or ca.MX): Time derivative of the state vector (n_x, ).
-        """
-        # Validate input dimensions
-        # TODO update for centralized dynamics
-        dx = u[0]  # x_dot = u_x
-        dy = u[1]  # y_dot = u_y
-        return ca.vertcat(dx, dy)
-
     def _solve(
         self,
         x_0: np.ndarray,
