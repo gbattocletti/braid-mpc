@@ -57,6 +57,7 @@ mpc_distributed.u_max = np.array([1, 1])
 mpc_distributed.x_min = np.array([-10, -10])
 mpc_distributed.x_max = np.array([10, 10])
 mpc_distributed.d_min = 0.2
+mpc_distributed.initialize_ocp()
 
 # Initialize helper variables
 x_pred = np.zeros([K, 2, m])
@@ -92,8 +93,8 @@ for t in time:
         # Extract solution and apply control input
         ego_agent.step(u_opt[0])
         ego_agent.sol = mpc_distributed.sol
-        x_pred_new[i, 0, :] = ego_agent.x  # save 'true' new state to predicted traj
-        x_pred_new[i, 1:, :] = x_opt[2:, :]  # store predicted traj for next step
+        x_pred_new[0, :, i] = ego_agent.x  # save 'true' new state to predicted traj
+        x_pred_new[1:, :, i] = x_opt[2:, :]  # store predicted traj for next step
 
         # Print debug info
         if DEBUG is True:

@@ -49,8 +49,8 @@ class MPC:
         # Optimization variables
         self.n_u: int = 2  # number of control inputs
         self.n_x: int = 2  # number of states
-        self.u: ca.Opti.variable  # control input (n_u, K)
-        self.x: ca.Opti.variable  # state trajectory (n_x, K+1)
+        self.u: ca.Opti.variable  # control input (K, n_x)
+        self.x: ca.Opti.variable  # state trajectory (K+1, n_x)
 
         # Optimization problem parameters
         # NOTE: the list of predicted states of the agents, as well as the arrays of
@@ -58,7 +58,7 @@ class MPC:
         # must be removed before passing the inputs to the MPC controller.
         self.x_0: ca.Opti.parameter  # initial state (n_x, )
         self.x_goal: ca.Opti.parameter  # goal state (n_x, )
-        self.x_pred: list[ca.Opti.parameter]  # agents' predicted states (m-1, n_x, K+1)
+        self.x_pred: list[ca.Opti.parameter]  # agents' predicted states (m-1, K+1, n_x)
         self.w_curr: ca.Opti.parameter  # current winding number w.r.t. agents (m-1, )
         self.w_target: ca.Opti.parameter  # target winding number w.r.t. agents (m-1, )
         self.cost_function: ca.Opti.variable  # cost function
@@ -156,75 +156,84 @@ class MPC:
             self.alpha_w = 0
 
         # Initialize optimization variables
-        self.x = self.ocp.variable(self.n_x, self.K + 1)  # state trajectory (n_x, K+1)
-        self.u = self.ocp.variable(self.n_u, self.K)  # control input (n_u, K)
+        self.x = self.ocp.variable(self.K + 1, self.n_x)  # state trajectory (K+1, n_x)
+        self.u = self.ocp.variable(self.K, self.n_u)  # control input (K, n_u)
 
         # Initialize OCP parameters
-        self.x_0 = self.ocp.parameter(self.n_x)
-        self.x_goal = self.ocp.parameter(self.n_x)
+        self.x_0 = self.ocp.parameter(1, self.n_x)
+        self.x_goal = self.ocp.parameter(1, self.n_x)
         self.w_curr = self.ocp.parameter(self.m - 1)
         self.w_target = self.ocp.parameter(self.m - 1)
-        self.x_pred = [
-            self.ocp.parameter(self.n_x, self.K + 1) for _ in range(self.m - 1)
-        ]
+        self.x_pred = [self.ocp.parameter(self.K, self.n_x) for _ in range(self.m - 1)]
 
         # Constraints
         # Initial state constraint
-        self.ocp.subject_to(self.x[:, 0] == self.x_0)
+        self.ocp.subject_to(self.x[0, :] == self.x_0)
 
         # Dynamics
         for k in range(self.K):
-            x_next = self.x[:, k] + self._dxdt(self.u[:, k]) * self.dt
-            self.ocp.subject_to(self.x[:, k + 1] == x_next)
+            x_next = self.x[k, :] + self._dxdt(self.u[k, :]) * self.dt
+            self.ocp.subject_to(self.x[k + 1, :] == x_next)
 
         # State constraints
         if self.x_min is not None and self.x_max is not None:
+            if self.x_min.shape != (1, self.n_x):
+                self.x_min = self.x_min.reshape(1, self.n_x)
+            if self.x_max.shape != (1, self.n_x):
+                self.x_max = self.x_max.reshape(1, self.n_x)
             for k in range(self.K + 1):
-                self.ocp.subject_to(self.x_min <= self.x[:, k])
-                self.ocp.subject_to(self.x[:, k] <= self.x_max)
+                self.ocp.subject_to(self.x_min <= self.x[k, :])
+                self.ocp.subject_to(self.x[k, :] <= self.x_max)
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:
+            if self.u_min.shape != (1, self.n_u):
+                self.u_min = self.u_min.reshape(1, self.n_u)
+            if self.u_max.shape != (1, self.n_u):
+                self.u_max = self.u_max.reshape(1, self.n_u)
             for k in range(self.K):
-                self.ocp.subject_to(self.u_min <= self.u[:, k])
-                self.ocp.subject_to(self.u[:, k] <= self.u_max)
+                self.ocp.subject_to(self.u_min <= self.u[k, :])
+                self.ocp.subject_to(self.u[k, :] <= self.u_max)
 
         # Input rate constraints
         if self.u_rate_min is not None and self.u_rate_max is not None:
+            if self.u_rate_min.shape != (1, self.n_u):
+                self.u_rate_min = self.u_rate_min.reshape(1, self.n_u)
+            if self.u_rate_max.shape != (1, self.n_u):
+                self.u_rate_max = self.u_rate_max.reshape(1, self.n_u)
             for k in range(self.K - 1):
-                self.ocp.subject_to(self.u_rate_min <= self.u[:, k + 1] - self.u[:, k])
-                self.ocp.subject_to(self.u[:, k + 1] - self.u[:, k] <= self.u_rate_max)
+                self.ocp.subject_to(self.u_rate_min <= self.u[k + 1, :] - self.u[k, :])
+                self.ocp.subject_to(self.u[k, :] - self.u[k, :] <= self.u_rate_max)
 
         # Total input constraints
         if self.u_tot_max is not None:
             for k in range(self.K):
-                self.ocp.subject_to(ca.norm_1(self.u[:, k]) <= self.u_tot_max)
+                self.ocp.subject_to(ca.norm_1(self.u[k, :]) <= self.u_tot_max)
 
         # Collision avoidance constraints
         # NOTE: the distance constraint is only computed w.r.t. other agents, and not
         # w.r.t. itself. Therefore only m-1 constraints are considered here.
         if self.d_min is not None:
             for j in range(self.m - 1):
-                for k in range(self.K + 1):
-                    dist = ca.norm_2(self.x[:, k] - self.x_pred[j][:, k])
+                for k in range(self.K):
+                    dist = ca.norm_2(self.x[k, :] - self.x_pred[j][k, :])
                     self.ocp.subject_to(dist >= self.d_min)
 
         # Cost function
         self.cost_function = 0
 
-        # Goal tracking cost
+        # Goal tracking cost (terminal cost)
         if self.alpha_goal is not None and self.alpha_goal > 0:
-            for k in range(self.K + 1):
-                self.cost_function += self.alpha_goal * (
-                    (self.x[0, k] - self.x_goal[0]) ** 2
-                    + (self.x[1, k] - self.x_goal[1]) ** 2
-                )
+            self.cost_function += self.alpha_goal * (
+                (self.x[self.K, 0] - self.x_goal[0]) ** 2
+                + (self.x[self.K, 1] - self.x_goal[1]) ** 2
+            )
 
         # Control input cost
         if self.alpha_u is not None and self.alpha_u > 0:
             for k in range(self.K):
                 self.cost_function += self.alpha_u * (
-                    self.u[:, k].T @ self.R @ self.u[:, k]
+                    self.u[k, :] @ self.R @ self.u[k, :].T
                 )
 
         # Winding cost
@@ -244,14 +253,14 @@ class MPC:
 
                 # Compute winding number w.r.t. j at the end of prediction horizon
                 w = self.w_curr[j]
-                for k in range(1, self.K + 1):
+                for k in range(1, self.K):
                     theta: ca.SX | ca.MX = ca.atan2(
-                        self.x[1, k] - self.x_pred[j][1, k],
-                        self.x[0, k] - self.x_pred[j][0, k],
+                        self.x[k, 1] - self.x_pred[j][k, 1],
+                        self.x[k, 0] - self.x_pred[j][k, 0],
                     )
                     theta_prev: ca.SX | ca.MX = ca.atan2(
-                        self.x[1, k - 1] - self.x_pred[j][1, k - 1],
-                        self.x[0, k - 1] - self.x_pred[j][0, k - 1],
+                        self.x[k - 1, 1] - self.x_pred[j][k - 1, 1],
+                        self.x[k - 1, 0] - self.x_pred[j][k - 1, 0],
                     )
                     w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
@@ -291,7 +300,7 @@ class MPC:
         """
         dx = u[0]  # x_dot = u_x
         dy = u[1]  # y_dot = u_y
-        return ca.vertcat(dx, dy)
+        return ca.horzcat(dx, dy)
 
     def solve(
         self,
@@ -309,7 +318,7 @@ class MPC:
         Args:
             x_0 (np.ndarray): initial state of the ego agent (n_x, )
             x_goal (np.ndarray): goal state of the ego agent (n_x, )
-            x_pred (list[np.ndarray]): predicted states of agents (m-1, n_x, K+1)
+            x_pred (list[np.ndarray]): predicted states of agents (K, n_x, m-1)
             w_curr (np.ndarray): current winding number w.r.t. agents (m-1, )
             w_target (np.ndarray): target winding number w.r.t. agents (m-1, )
             use_warm_start (bool, optional): whether to use the previous solution for
@@ -342,15 +351,16 @@ class MPC:
             raise ValueError(
                 f"x_goal must have shape ({self.n_x},), but got {x_goal.shape}."
             )
-        if len(x_pred) != self.m - 1:
+        if x_pred.shape[2] != self.m - 1:
             raise ValueError(
-                f"x_pred must be a list of length {self.m - 1}, but got {len(x_pred)}."
+                f"x_pred must have shape ({self.K}, {self.n_x}, {self.m - 1}), "
+                f"but got {x_pred.shape}."
             )
-        for j, x_pred_j in enumerate(x_pred):
-            if x_pred_j.shape != (self.n_x, self.K + 1):
+        for j in range(self.m - 1):
+            if x_pred[:, :, j].shape != (self.K, self.n_x):
                 raise ValueError(
-                    f"x_pred[{j}] must have shape ({self.n_x}, {self.K + 1}), "
-                    f"got {x_pred_j.shape} instead."
+                    f"x_pred[{j}] must have shape ({self.K}, {self.n_x}), "
+                    f"got {x_pred[:, :, j].shape} instead."
                 )
         if w_curr.shape != (self.m - 1,):
             raise ValueError(
@@ -373,7 +383,7 @@ class MPC:
         self.ocp.set_value(self.w_curr, w_curr)
         self.ocp.set_value(self.w_target, w_target)
         for j in range(self.m - 1):
-            self.ocp.set_value(self.x_pred[j], x_pred[j])
+            self.ocp.set_value(self.x_pred[j], x_pred[:, :, j])
 
         # Warm start
         if use_warm_start is True and self.sol is not None:
@@ -383,7 +393,7 @@ class MPC:
             # See: https://github.com/casadi/casadi/discussions/3539
             # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-"NaN-detected"in-my-optimization%3F  # pylint: disable=line-too-long
             for k in range(self.K + 1):
-                self.ocp.set_initial(self.x[:, k], x_0)
+                self.ocp.set_initial(self.x[k, :], x_0)
         else:
             # No warm start
             # CHECKME: check if this case leads to issues
@@ -447,14 +457,14 @@ class MPC:
         if self.alpha_goal is not None and self.alpha_goal > 0:
             for k in range(self.K + 1):
                 goal_cost += self.alpha_goal * (
-                    (x[0, k] - x_goal[0]) ** 2 + (x[1, k] - x_goal[1]) ** 2
+                    (x[k, 0] - x_goal[0]) ** 2 + (x[k, 1] - x_goal[1]) ** 2
                 )
 
         # Control input cost
         control_cost = 0
         if self.alpha_u is not None and self.alpha_u > 0:
             for k in range(self.K):
-                control_cost += self.alpha_u * (u[:, k].T @ self.R @ u[:, k])
+                control_cost += self.alpha_u * (u[k, :].T @ self.R @ u[k, :])
 
         # Winding cost
         winding_cost = 0
@@ -472,12 +482,12 @@ class MPC:
                 w: float = w_curr[j]
                 for k in range(1, self.K + 1):
                     theta: float = np.atan2(
-                        x[1, k] - x_pred[j][1, k],
-                        x[0, k] - x_pred[j][0, k],
+                        x[k, 1] - x_pred[j][k, 1],
+                        x[k, 0] - x_pred[j][k, 0],
                     )
                     theta_prev: float = np.atan2(
-                        x[1, k - 1] - x_pred[j][1, k - 1],
-                        x[0, k - 1] - x_pred[j][0, k - 1],
+                        x[k - 1, 1] - x_pred[j][k - 1, 1],
+                        x[k - 1, 0] - x_pred[j][k - 1, 0],
                     )
                     w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
 
