@@ -81,15 +81,14 @@ class DistributedMPC(MPC):
         # Cost function
         self.cost_function = 0
 
-        # Goal tracking cost
+        # Goal tracking cost (terminal cost)
         if self.alpha_g is not None and self.alpha_g > 0:
-            for k in range(self.K + 1):
-                self.cost_function += self.alpha_g * (
-                    (self.x[k, 0] - self.x_goal[0]) ** 2
-                    + (self.x[k, 1] - self.x_goal[1]) ** 2
-                )
+            self.cost_function += self.alpha_g * (
+                (self.x[self.K, 0] - self.x_goal[0]) ** 2
+                + (self.x[self.K, 1] - self.x_goal[1]) ** 2
+            )
 
-        # Terminal goal tracking cost
+        # Goal progress cost (terminal cost)
         if self.alpha_g_terminal is not None and self.alpha_g_terminal > 0:
             delta_goal = (
                 (self.x[self.K, 0] - self.x_goal[0]) ** 2
