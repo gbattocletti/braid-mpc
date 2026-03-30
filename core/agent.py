@@ -19,16 +19,14 @@ class Agent:
 
         # Agent state info
         self.x: np.ndarray | None = None  # current state of the agent
-        self.x_init: np.ndarray | None = None  # initial state of the agent
         self.x_goal: np.ndarray | None = None  # goal state of the agent
-        self.x_pred: np.ndarray | None = None  # agent's predicted trajectory
 
         # MPC solution object (for warm starting the optimization problem)
         self.sol: ca.OptiSol | None = None  # solution of the OCP
 
     def step(self, u: np.ndarray) -> None:
         """
-        Take an action based on the control input.
+        Take an action based on the control input and the agent's dynamics.
 
         Args:
             u (np.ndarray): Control input for the agent.
@@ -36,4 +34,6 @@ class Agent:
         Returns:
             None
         """
-        self.x = self.x + u * self.dt  # simple dynamics: x_next = x_prev + u*dt
+
+        # simple dynamics (single integrator): x_next = x_prev + u*dt
+        self.x = self.x + u * self.dt
