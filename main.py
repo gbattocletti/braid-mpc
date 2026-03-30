@@ -1,13 +1,15 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import rps.robotarium as rb
 
 from core import agent, mpc
 from data import grids_1, grids_2  # pylint: disable=unused-import
-from utils import invariants
+from utils import invariants, robotarium_bridge
 from visualization import plot
 
-# Settings
+## Settings ############################################################################
 DEBUG = True
+USE_ROBOTARIUM = True
 data = grids_2
 np.random.seed(1312)
 
@@ -31,7 +33,7 @@ windings = invariants.paths2windings(
 n_windings = windings.shape[0]  # length of the winding number vector
 plot.plot_windings(windings, show=False)
 
-## Controller Setup ##################################################################
+## Controller and agents setup #########################################################
 # Initialize controller's properties
 dt = 0.5  # s
 K = 20  # time steps
@@ -44,26 +46,52 @@ for i in range(m):
     M[i].x_goal = x_goal[i, :]
 
 # Initialize MPC controller (local MPC for distributed control architecture)
+# NOTE: when using the robotarium, the velocity limits (u limits) must currently be
+# scaled manually to match the robotarium's velocity limits, depending on the scaling
+# factor used between the robotarium environment size and the 'real world' environment
+# size. Otherwise, the robot's velocity will be different than expected.
 mpc_distributed = mpc.MPC()
 mpc_distributed.dt = dt
 mpc_distributed.K = K
 mpc_distributed.m = m
-mpc_distributed.alpha_u = 1.0
+mpc_distributed.alpha_u = 0.001
 mpc_distributed.alpha_goal = 1.0
 mpc_distributed.alpha_w = 1.0
 mpc_distributed.R = np.diag([1, 1])
-mpc_distributed.u_min = np.array([-1, -1])  # TODO: check values against robotarium
-mpc_distributed.u_max = np.array([1, 1])
-mpc_distributed.x_min = np.array([-10, -10])
+mpc_distributed.u_min = np.array([-0.625, -0.625])
+mpc_distributed.u_max = np.array([0.625, 0.625])
+mpc_distributed.x_min = np.array([0, 0])
 mpc_distributed.x_max = np.array([10, 10])
-mpc_distributed.d_min = 0.2
+mpc_distributed.d_min = 0.4  # slightly larger than needed
 mpc_distributed.initialize_ocp()
 
 # Initialize helper variables
 x_pred = np.zeros([K, 2, m])
 x_pred_new = np.zeros([K, 2, m])
+v_vec = np.zeros((2, m))  # only used for robotarium
 
-# Main simulation loop
+## Simulation setup ####################################################################
+if USE_ROBOTARIUM is True:
+    x_init_robotarium: np.ndarray = np.vstack(
+        [
+            robotarium_bridge.real2robotarium(
+                x_init,
+                [mpc_distributed.x_min[0][0], mpc_distributed.x_max[0][0]],
+                [mpc_distributed.x_min[0][1], mpc_distributed.x_max[0][1]],
+                coords_type="position",
+            ).T,
+            np.zeros([1, m]),
+        ]
+    )
+    r = rb.Robotarium(
+        number_of_robots=m,
+        initial_conditions=x_init_robotarium,
+        show_figure=True,
+        sim_in_real_time=True,
+    )
+    x_meas = r.get_poses()
+
+## Main simulation loop ################################################################
 T = 50  # total simulation time (s)
 time = np.arange(0, T + dt, dt)
 for t in time:
@@ -91,17 +119,46 @@ for t in time:
         )
 
         # Extract solution and apply control input
-        ego_agent.step(u_opt[0])
-        ego_agent.sol = mpc_distributed.sol
+        if USE_ROBOTARIUM is True:
+
+            v_vec[:, i] = robotarium_bridge.real2robotarium(
+                u_opt[0],
+                [mpc_distributed.u_min[0][0], mpc_distributed.u_max[0][0]],
+                [mpc_distributed.u_min[0][1], mpc_distributed.u_max[0][1]],
+                coords_type="velocity",
+            )  # set velocity command for agent i in robotarium
+        ego_agent.step(u_opt[0])  # simulate step using agent's dynamics
         x_pred_new[0, :, i] = ego_agent.x  # save 'true' new state to predicted traj
         x_pred_new[1:, :, i] = x_opt[2:, :]  # store predicted traj for next step
+        ego_agent.sol = mpc_distributed.sol  # save solution for warm start @ next step
 
         # Print debug info
         if DEBUG is True:
             print(f"Time: {t:.2f} s, Agent {i}, Control input: {u_opt[0]}")
 
+    # Simulate with Robotarium
+    if USE_ROBOTARIUM is True:
+
+        # Execute simulation step
+        r.set_velocities(range(m), v_vec)
+        r.step()
+
+        # Overwrite 'true' new states with the ones measured from Robotarium
+        x_meas = r.get_poses()
+        for i in range(m):
+            x_pred_new[0, :, i] = robotarium_bridge.robotarium2real(
+                x_meas[:, i],
+                [mpc_distributed.x_min[0][0], mpc_distributed.x_max[0][0]],
+                [mpc_distributed.x_min[0][1], mpc_distributed.x_max[0][1]],
+                coords_type="position",
+            )
+            M[i].x = x_pred_new[0, :, i]
+
     # Update variables for the next iteration
     x_pred = x_pred_new
+
+## Evaluate results and show plots #####################################################
+
 
 # Show all plots
 plt.show()
