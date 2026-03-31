@@ -64,15 +64,15 @@ mpc.u_min = np.array([-0.625, -0.625])
 mpc.u_max = np.array([0.625, 0.625])
 mpc.x_min = np.array([0, 0])
 mpc.x_max = np.array([10, 10])
-mpc.d_min = 0.01  # slightly larger than needed
+mpc.d_min = 0.05  # slightly larger than needed
 mpc.initialize_ocp()
 
 # Initialize helper variables
-x_pred: np.ndarray | None = None
+x_pred: np.ndarray | None
 if mpc.architecture == "distributed":
     x_pred = np.zeros([K, 2, m])
-    x_pred_new = np.zeros([K, 2, m])
 elif mpc.architecture == "centralized":
+    x_pred = None  # not needed for centralized MPC
     x_goal = np.array([M[i].x_goal for i in range(m)]).T  # reshape to 2 x m
 
 # Initialize robotarium variables
@@ -104,51 +104,45 @@ T = 20  # total simulation time (s)
 time = np.arange(0, T + dt, dt)
 for t in time:
 
-    # Compute current and target winding numbers
+    # 1. Compute current and target winding numbers
     # NOTE: currently the time progresses constantly along the braid
     tau = t / T  # time n
     w_curr = windings[int(tau * (n_windings - 1)), :, :]
     tau_target = min((t + K * dt) / T, 1)  # cap target time at the end of the braid
     w_target = windings[int(tau_target * (n_windings - 1)), :, :]
 
+    # 2. Solve MPC problem
     if mpc.architecture == "distributed":
+        # Collect predicted trajectories of all agents
+        # TODO: check dimensions and indexing
         for i in range(m):
-            ego_agent = M[i]  # select i-th agent and solve local MPC problem
-            x_0 = ego_agent.x  # store to print step info later
+            x_pred[0:, :, i] = M[i].x
+            x_pred[1:, :, i] = M[i].x_opt[2:]
 
-            # Solve local MPC problem for the ego agent
+        # Solve local MPC problem for each agent
+        for i in range(m):
             (u_opt, x_opt, cost, t_sol) = mpc.solve(
-                x_0=x_0,
-                x_goal=ego_agent.x_goal,
+                x_0=M[i].x,
+                x_goal=M[i].x_goal,
                 w_curr=np.delete(w_curr[i], i, axis=0),  # remove self winding number
                 w_target=np.delete(w_target[i], i, axis=0),
                 use_warm_start=True,
-                sol=ego_agent.sol,
-                x_pred=np.delete(x_pred, i, axis=2),
+                sol=M[i].sol,
+                x_pred=np.delete(x_pred, i, axis=2),  # remove self predicted trajectory
             )
+            M[i].sol = mpc.sol  # save solution in agent object
+            M[i].u_opt = u_opt
+            M[i].x_opt = x_opt
+            M[i].cost = cost
+            M[i].t_sol = t_sol
 
-            # Extract solution and apply control input
-            if USE_ROBOTARIUM is True:
-                v_vec[:, i] = robotarium_bridge.real2robotarium(
-                    u_opt[0],
-                    [mpc.u_min[0][0], mpc.u_max[0][0]],
-                    [mpc.u_min[0][1], mpc.u_max[0][1]],
-                    coords_type="velocity",
-                )  # set velocity command for agent i in robotarium
-            ego_agent.sol = mpc.sol  # save solution for warm start @ next step
-
-            # Print debug info
-            if DEBUG is True:
-                print(
-                    f"t: {t:5.2f}s, i: {i}, x(k): [{x_0[0]:5.2f},{x_0[1]:5.2f}], "
-                    f"x(k+1): [{ego_agent.x[0]:5.2f},{ego_agent.x[1]:5.2f}], "
-                    f"u*(0|k): [{u_opt[0, 0]: 4.2f},{u_opt[0, 1]: 4.2f}], "
-                    f"t_sol: {t_sol:.2f}s, cost: {cost:.2f}"
-                )
+    # Centralized MPC controller
     elif mpc.architecture == "centralized":
+        # Collect initial states of all agents
+        x_0 = [M[i].x for i in range(m)]
+        x_0 = np.array(x_0).T  # reshape to m x 2
 
-        # Solve centralized MPC problem for all agents
-        x_0 = np.array([M[i].x for i in range(m)]).T  # reshape to 2 x m
+        # Solve centralized MPC problem
         (u_opt, x_opt, cost, t_sol) = mpc.solve(
             x_0=x_0,
             x_goal=x_goal,
@@ -158,49 +152,65 @@ for t in time:
             sol_prev=mpc.sol,
         )
 
-        # Extract solution and apply control input
-        if USE_ROBOTARIUM is True:
-            for i in range(m):
-                v_vec[:, i] = robotarium_bridge.real2robotarium(
-                    u_opt[i][0],
-                    [mpc.u_min[0][0], mpc.u_max[0][0]],
-                    [mpc.u_min[0][1], mpc.u_max[0][1]],
-                    coords_type="velocity",
-                )  # set velocity command for all agents in robotarium
+        # Save solution in agent objects
+        for i in range(m):
+            M[i].u_opt = u_opt[i]
+            M[i].x_opt = x_opt[i]
+            M[i].cost = cost  # same cost for all agents in centralized MPC
+            M[i].t_sol = t_sol  # same solution time for all agents in centralized MPC
 
-        # Print debug info
-        if DEBUG is True:
-            print(f"t: {t:5.2f}s, t_sol: {t_sol:.2f}s, cost: {cost:.2f}")
+    else:
+        raise ValueError(f"Invalid architecture: {mpc.architecture}")
 
-    # Simulate with Robotarium
+    # 3. Take one step in the environment and get new state
     if USE_ROBOTARIUM is True:
+        for i in range(m):
+            v_vec[:, i] = robotarium_bridge.real2robotarium(
+                M[i].u_opt[0],
+                [mpc.u_min[0][0], mpc.u_max[0][0]],
+                [mpc.u_min[0][1], mpc.u_max[0][1]],
+                coords_type="velocity",
+            )
 
-        # Execute simulation step
+        # Simulate with Robotarium
         r.set_velocities(range(m), v_vec)
         r.step()
 
-        # Overwrite 'true' new states with the ones measured from Robotarium
+        # Get new states from Robotarium
+        # TODO: check dimensions and indexing
         x_meas = r.get_poses()
-        if mpc.architecture == "distributed":
-            for i in range(m):
-                x_pred_new[0, :, i] = robotarium_bridge.robotarium2real(
-                    x_meas[:, i],
-                    [mpc.x_min[0][0], mpc.x_max[0][0]],
-                    [mpc.x_min[0][1], mpc.x_max[0][1]],
-                    coords_type="position",
-                )[0:-1]
-                M[i].x = x_pred_new[0, :, i]
+        for i in range(m):
+            M[i].x = robotarium_bridge.robotarium2real(
+                x_meas[:, i],
+                [mpc.x_min[0][0], mpc.x_max[0][0]],
+                [mpc.x_min[0][1], mpc.x_max[0][1]],
+                coords_type="position",
+            )
 
-    # Simulate with internal agents' dynamics
     else:
-        pass  # TODO
+        # Simulate step using agent's dynamics
+        for i in range(m):
+            M[i].step(M[i].u_opt[0])
 
-    # Update variables for the next iteration
-    if mpc.architecture == "distributed":
-        x_pred = x_pred_new
+    # 4. Print debug info
+    # TODO: check dimensions and indexing
+    if DEBUG is True:
+        print(f"t: {t:5.2f}s", end="")
+        for i in range(m):
+            print(
+                f"\ti: {i}, "
+                f"x(k): [{M[i].x_opt[0]:5.2f},{M[i].x_opt[1]:5.2f}], "
+                f"x(k+1): [{M[i].x[0]:5.2f},{M[i].x[1]:5.2f}], "
+                f"u*(0|k): [{M[i].u_opt[0]: 4.2f},{M[i].u_opt[1]: 4.2f}], "
+                f"t_sol: {M[i].t_sol:.2f}s, "
+                f"cost: {M[i].cost:.2f}"
+            )
+
+# Call robotarium termination function
+r.call_at_scripts_end()
 
 ## Evaluate results and show plots #####################################################
-
+# TODO
 
 # Show all plots
 plt.show()

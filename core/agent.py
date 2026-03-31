@@ -19,10 +19,16 @@ class Agent:
 
         # Agent state info
         self.x: np.ndarray | None = None  # current state of the agent
+        self.x_opt: np.ndarray | None = None  # state trajectory from MPC solution
+        self.u_opt: np.ndarray | None = None  # control trajectory from MPC solution
+
+        # Agent goal info
         self.x_goal: np.ndarray | None = None  # goal state of the agent
 
         # MPC solution object (for warm starting the optimization problem)
         self.sol: ca.OptiSol | None = None  # solution of the OCP
+        self.cost: float | None = None  # cost of the MPC solution
+        self.t_sol: float | None = None  # time taken to solve the MPC problem
 
     def step(self, u: np.ndarray) -> None:
         """
