@@ -2,8 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import rps.robotarium as rb
 
-from core import agent, mpc
-from data import grids_1, grids_2  # pylint: disable=unused-import
+# pylint: disable=unused-import
+from core import agent, mpc_centralized, mpc_distributed
+from data import grids_1, grids_2
 from utils import invariants, robotarium_bridge
 from visualization import plot
 
@@ -50,20 +51,20 @@ for i in range(m):
 # scaled manually to match the robotarium's velocity limits, depending on the scaling
 # factor used between the robotarium environment size and the 'real world' environment
 # size. Otherwise, the robot's velocity will be different than expected.
-mpc_distributed = mpc.MPC()
-mpc_distributed.dt = dt
-mpc_distributed.K = K
-mpc_distributed.m = m
-mpc_distributed.alpha_u = 0.001
-mpc_distributed.alpha_goal = 1000.0
-mpc_distributed.alpha_w = 0
-mpc_distributed.R = np.diag([1, 1])
-mpc_distributed.u_min = np.array([-0.625, -0.625])
-mpc_distributed.u_max = np.array([0.625, 0.625])
-mpc_distributed.x_min = np.array([0, 0])
-mpc_distributed.x_max = np.array([10, 10])
-mpc_distributed.d_min = 0.01  # slightly larger than needed
-mpc_distributed.initialize_ocp()
+mpc = mpc_distributed.DistributedMPC()
+mpc.dt = dt
+mpc.K = K
+mpc.m = m
+mpc.alpha_u = 0
+mpc.alpha_g = 1000.0
+mpc.alpha_w = 0
+mpc.R = np.diag([1, 1])
+mpc.u_min = np.array([-0.625, -0.625])
+mpc.u_max = np.array([0.625, 0.625])
+mpc.x_min = np.array([0, 0])
+mpc.x_max = np.array([10, 10])
+mpc.d_min = 0.01  # slightly larger than needed
+mpc.initialize_ocp()
 
 # Initialize helper variables
 x_pred = np.zeros([K, 2, m])
@@ -76,8 +77,8 @@ if USE_ROBOTARIUM is True:
         [
             robotarium_bridge.real2robotarium(
                 x_init,
-                [mpc_distributed.x_min[0][0], mpc_distributed.x_max[0][0]],
-                [mpc_distributed.x_min[0][1], mpc_distributed.x_max[0][1]],
+                [mpc.x_min[0][0], mpc.x_max[0][0]],
+                [mpc.x_min[0][1], mpc.x_max[0][1]],
                 coords_type="position",
             ).T,
             np.zeros([1, m]),
@@ -109,7 +110,7 @@ for t in time:
         x_start = ego_agent.x  # for debugging only
 
         # Solve local MPC problem for the ego agent
-        (u_opt, x_opt, cost, t_sol) = mpc_distributed.solve(
+        (u_opt, x_opt, cost, t_sol) = mpc.solve(
             x_0=ego_agent.x,
             x_goal=ego_agent.x_goal,
             x_pred=np.delete(x_pred, i, axis=2),  # remove ego agent's predicted traj
@@ -123,14 +124,14 @@ for t in time:
         if USE_ROBOTARIUM is True:
             v_vec[:, i] = robotarium_bridge.real2robotarium(
                 u_opt[0],
-                [mpc_distributed.u_min[0][0], mpc_distributed.u_max[0][0]],
-                [mpc_distributed.u_min[0][1], mpc_distributed.u_max[0][1]],
+                [mpc.u_min[0][0], mpc.u_max[0][0]],
+                [mpc.u_min[0][1], mpc.u_max[0][1]],
                 coords_type="velocity",
             )  # set velocity command for agent i in robotarium
         ego_agent.step(u_opt[0])  # simulate step using agent's dynamics
         x_pred_new[0, :, i] = ego_agent.x  # save 'true' new state to predicted traj
         x_pred_new[1:, :, i] = x_opt[2:, :]  # store predicted traj for next step
-        ego_agent.sol = mpc_distributed.sol  # save solution for warm start @ next step
+        ego_agent.sol = mpc.sol  # save solution for warm start @ next step
 
         # Print debug info
         if DEBUG is True:
@@ -153,8 +154,8 @@ for t in time:
         for i in range(m):
             x_pred_new[0, :, i] = robotarium_bridge.robotarium2real(
                 x_meas[:, i],
-                [mpc_distributed.x_min[0][0], mpc_distributed.x_max[0][0]],
-                [mpc_distributed.x_min[0][1], mpc_distributed.x_max[0][1]],
+                [mpc.x_min[0][0], mpc.x_max[0][0]],
+                [mpc.x_min[0][1], mpc.x_max[0][1]],
                 coords_type="position",
             )[0:-1]
             M[i].x = x_pred_new[0, :, i]

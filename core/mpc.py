@@ -1,17 +1,17 @@
+from abc import ABC, abstractmethod
+
 import casadi as ca
 import numpy as np
 
-from utils import invariants
 
-
-class MPC:
+class MPC(ABC):
 
     def __init__(self) -> None:
         """
         Initialize the MPC controller.
 
         Args:
-            agent_id (int): Unique identifier for the agent.
+            None
 
         Returns:
             None
@@ -20,9 +20,8 @@ class MPC:
         self.dt: float | None = None  # time step
         self.K: int | None = None  # prediction horizon
         self.m: int | None = None  # number of agents
-
-        # Flag for OCP cost function
-        self.winding_aware: bool = True  # whether to include winding cost in OCP
+        self.n_u: int = 2  # number of control inputs
+        self.n_x: int = 2  # number of states
 
         # Optimization problem
         self.ocp: ca.Opti = ca.Opti()
@@ -37,8 +36,8 @@ class MPC:
         self.solver: str = "ipopt"
         self.solver_options: dict = {
             "max_iter": 10_000,
-            "max_wall_time": 120.0,  # [s]
-            "max_cpu_time": 60.0,  # [s]
+            "max_wall_time": 100.0,  # [s]
+            "max_cpu_time": 100.0,  # [s]
             "print_level": 0,  # 0-5 (0 = silent, 5 = verbose)
             "tol": 1e-6,  # optimality tolerance
             "acceptable_tol": 1e-4,  # tolerance for early termination
@@ -47,62 +46,57 @@ class MPC:
         self.sol: ca.OptiSol | None = None  # solution of the OCP
 
         # Optimization variables
-        self.n_u: int = 2  # number of control inputs
-        self.n_x: int = 2  # number of states
-        self.u: ca.Opti.variable  # control input (K, n_x)
-        self.x: ca.Opti.variable  # state trajectory (K+1, n_x)
+        self.u: ca.Opti.variable  # control input
+        self.x: ca.Opti.variable  # state trajectory
+        self.cost_function: ca.Opti.variable  # cost function
 
         # Optimization problem parameters
-        # NOTE: the list of predicted states of the agents, as well as the arrays of
-        # winding numbers, must not include the ego agent itself. The ego agent's info
-        # must be removed before passing the inputs to the MPC controller.
-        self.x_0: ca.Opti.parameter  # initial state (n_x, )
-        self.x_goal: ca.Opti.parameter  # goal state (n_x, )
-        self.x_pred: list[ca.Opti.parameter]  # agents' predicted states (m-1, K+1, n_x)
-        self.w_curr: ca.Opti.parameter  # current winding number w.r.t. agents (m-1, )
-        self.w_target: ca.Opti.parameter  # target winding number w.r.t. agents (m-1, )
-        self.cost_function: ca.Opti.variable  # cost function
+        self.x_0: ca.Opti.parameter  # initial state
+        self.x_goal: ca.Opti.parameter  # goal state
+        self.w_curr: ca.Opti.parameter  # current winding number w.r.t. agents
+        self.w_target: ca.Opti.parameter  # target winding number w.r.t. agents
 
         # Cost function weights and matrices
         self.alpha_u: float | None = None  # control input cost weight
-        self.alpha_goal: float | None = None  # goal cost weight
-        self.alpha_w: np.ndarray | float | None = None  # winding cost weight (m-1, )
+        self.alpha_g: float | None = None  # goal tracking cost weight
+        self.alpha_g_progress: float | None = None  # weight for progress toward goal
+        self.alpha_w: np.ndarray | float | None = None  # winding cost weight
         self.R: np.ndarray | None = None  # control input cost matrix
 
         # Constraints
-        self.u_min: np.ndarray | None = None  # (n_u, )
-        self.u_max: np.ndarray | None = None  # (n_u, )
-        self.u_rate_min: np.ndarray | None = None  # (n_u, )
-        self.u_rate_max: np.ndarray | None = None  # (n_u, )
+        self.u_min: np.ndarray | None = None
+        self.u_max: np.ndarray | None = None
+        self.u_rate_min: np.ndarray | None = None
+        self.u_rate_max: np.ndarray | None = None
         self.u_tot_max: float | None = None  # maximum total control input
-        self.x_min: np.ndarray | None = None  # (n_x, )
-        self.x_max: np.ndarray | None = None  # (n_x, )
+        self.x_min: np.ndarray | None = None
+        self.x_max: np.ndarray | None = None
         self.d_min: float | None = None  # minimum distance between agents
 
     def __call__(
         self,
         x_0: np.ndarray,
         x_goal: np.ndarray,
-        x_pred: list[np.ndarray],
         w_curr: np.ndarray,
         w_target: np.ndarray,
         use_warm_start: bool = True,
-        sol: ca.OptiSol | None = None,
+        sol_prev: ca.OptiSol | None = None,
+        **kwargs,
     ) -> tuple[np.ndarray, np.ndarray, float, float]:
         """
         Call the MPC controller to solve the NMPC problem. See the `solve` method for
         details on the arguments and return values.
         """
-        u, x_pred, cost, time = self.solve(
+        u_opt, x_opt, cost, t_sol = self.solve(
             x_0,
             x_goal,
-            x_pred,
             w_curr,
             w_target,
             use_warm_start,
-            sol,
+            sol_prev,
+            **kwargs,
         )
-        return u, x_pred, cost, time
+        return u_opt, x_opt, cost, t_sol
 
     @staticmethod
     def angle_diff(
@@ -122,15 +116,13 @@ class MPC:
         """
         return ca.atan2(ca.sin(angle_1 - angle_2), ca.cos(angle_1 - angle_2))
 
-    def initialize_ocp(self, winding_aware: bool = True) -> None:
+    def initialize_ocp(self) -> None:
         """
         Initialize the optimal control problem (OCP) for the MPC controller. This method
         should be called before calling the `solve` method for the first time.
 
         Args:
-            winding_aware (bool, optional): whether to include the winding cost in the
-                OCP. Default is True. If False, the OCP will be initialized without the
-                winding cost.
+            None
 
         Returns:
             None
@@ -142,146 +134,21 @@ class MPC:
         if self.ocp_ready:
             raise RuntimeError("The OCP has already been initialized.")
 
-        # Validate inputs
-        if not isinstance(winding_aware, bool):
-            raise ValueError(
-                f"winding_aware must be a boolean, but got {type(winding_aware)}."
-            )
-        else:
-            self.winding_aware = winding_aware
+        # Call the method implemented in the subclass to set up the OCP
+        self._initialize_ocp()
 
-        # Check winding-aware flag
-        # If MPC is not winding-aware, set the weight to 0 and skip winding cost
-        if self.winding_aware is False:
-            self.alpha_w = 0
+    @abstractmethod
+    def _initialize_ocp(self):
+        raise NotImplementedError(
+            "The _initialize_ocp() method must be implemented in a subclass of MPC."
+        )
 
-        # Initialize optimization variables
-        self.x = self.ocp.variable(self.K + 1, self.n_x)  # state trajectory (K+1, n_x)
-        self.u = self.ocp.variable(self.K, self.n_u)  # control input (K, n_u)
-
-        # Initialize OCP parameters
-        self.x_0 = self.ocp.parameter(1, self.n_x)
-        self.x_goal = self.ocp.parameter(1, self.n_x)
-        self.w_curr = self.ocp.parameter(self.m - 1)
-        self.w_target = self.ocp.parameter(self.m - 1)
-        self.x_pred = [self.ocp.parameter(self.K, self.n_x) for _ in range(self.m - 1)]
-
-        # Constraints
-        # Initial state constraint
-        self.ocp.subject_to(self.x[0, :] == self.x_0)
-
-        # Dynamics
-        for k in range(self.K):
-            x_next = self.x[k, :] + self._dxdt(self.u[k, :]) * self.dt
-            self.ocp.subject_to(self.x[k + 1, :] == x_next)
-
-        # State constraints
-        if self.x_min is not None and self.x_max is not None:
-            if self.x_min.shape != (1, self.n_x):
-                self.x_min = self.x_min.reshape(1, self.n_x)
-            if self.x_max.shape != (1, self.n_x):
-                self.x_max = self.x_max.reshape(1, self.n_x)
-            for k in range(self.K + 1):
-                self.ocp.subject_to(self.x_min <= self.x[k, :])
-                self.ocp.subject_to(self.x[k, :] <= self.x_max)
-
-        # Input constraints
-        if self.u_min is not None and self.u_max is not None:
-            if self.u_min.shape != (1, self.n_u):
-                self.u_min = self.u_min.reshape(1, self.n_u)
-            if self.u_max.shape != (1, self.n_u):
-                self.u_max = self.u_max.reshape(1, self.n_u)
-            for k in range(self.K):
-                self.ocp.subject_to(self.u_min <= self.u[k, :])
-                self.ocp.subject_to(self.u[k, :] <= self.u_max)
-
-        # Input rate constraints
-        if self.u_rate_min is not None and self.u_rate_max is not None:
-            if self.u_rate_min.shape != (1, self.n_u):
-                self.u_rate_min = self.u_rate_min.reshape(1, self.n_u)
-            if self.u_rate_max.shape != (1, self.n_u):
-                self.u_rate_max = self.u_rate_max.reshape(1, self.n_u)
-            for k in range(self.K - 1):
-                self.ocp.subject_to(self.u_rate_min <= self.u[k + 1, :] - self.u[k, :])
-                self.ocp.subject_to(self.u[k, :] - self.u[k, :] <= self.u_rate_max)
-
-        # Total input constraints
-        if self.u_tot_max is not None:
-            for k in range(self.K):
-                self.ocp.subject_to(ca.norm_1(self.u[k, :]) <= self.u_tot_max)
-
-        # Collision avoidance constraints
-        # NOTE: the distance constraint is only computed w.r.t. other agents, and not
-        # w.r.t. itself. Therefore only m-1 constraints are considered here.
-        if self.d_min is not None:
-            for j in range(self.m - 1):
-                for k in range(self.K):
-                    dist = ca.norm_2(self.x[k, :] - self.x_pred[j][k, :])
-                    self.ocp.subject_to(dist >= self.d_min)
-
-        # Cost function
-        self.cost_function = 0
-
-        # Goal tracking cost (terminal cost)
-        if self.alpha_goal is not None and self.alpha_goal > 0:
-            self.cost_function += self.alpha_goal * (
-                (self.x[self.K, 0] - self.x_goal[0]) ** 2
-                + (self.x[self.K, 1] - self.x_goal[1]) ** 2
-            )
-
-        # Control input cost
-        if self.alpha_u is not None and self.alpha_u > 0:
-            for k in range(self.K):
-                self.cost_function += self.alpha_u * (
-                    self.u[k, :] @ self.R @ self.u[k, :].T
-                )
-
-        # Winding cost
-        # NOTE: the winding cost is only computed w.r.t. other agents, and not w.r.t.
-        # itself, since the winding number w.r.t. itself is always 0. Therefore only m-1
-        # terms are summed in the winding cost.
-        if self.alpha_w is not None and np.any(self.alpha_w > 0):
-            for j in range(self.m - 1):
-
-                # Get weight for agent j
-                alpha_w_j: float
-                if isinstance(self.alpha_w, np.ndarray):
-                    self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
-                    alpha_w_j = self.alpha_w[j]
-                else:
-                    alpha_w_j = self.alpha_w
-
-                # Compute winding number w.r.t. j at the end of prediction horizon
-                w = self.w_curr[j]
-                for k in range(1, self.K):
-                    theta: ca.SX | ca.MX = ca.atan2(
-                        self.x[k, 1] - self.x_pred[j][k, 1],
-                        self.x[k, 0] - self.x_pred[j][k, 0],
-                    )
-                    theta_prev: ca.SX | ca.MX = ca.atan2(
-                        self.x[k - 1, 1] - self.x_pred[j][k - 1, 1],
-                        self.x[k - 1, 0] - self.x_pred[j][k - 1, 0],
-                    )
-                    w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
-
-                # Add winding cost to the total cost function
-                self.cost_function += alpha_w_j * (self.w_target[j] - w) ** 2
-
-        # Define the objective
-        self.ocp.minimize(self.cost_function)
-
-        # Set the solver options
-        self.ocp.solver(self.solver, self.ocp_options, self.solver_options)
-
-        # Set ready flag to true
-        self.ocp_ready = True
-
-    def _dxdt(
+    def dxdt(
         self,
         u: ca.SX | ca.MX,
     ) -> ca.SX | ca.MX:
         """
-        Continuous-time dynamics function for the MPC controller. To be integrated
+        Continuous-time dynamics function for the MPC controller to be integrated
         numerically within the MPC prediction model. The dynamics are defined as:
             dxdt = f(x, u)
 
@@ -292,25 +159,35 @@ class MPC:
             u = [u_x, u_y]^T
 
         Args:
-            x (ca.SX or ca.MX): State vector (n_x, ).
             u (ca.SX or ca.MX): Control input vector (n_u, ).
 
         Returns:
             dxdt (ca.SX or ca.MX): Time derivative of the state vector (n_x, ).
         """
+        # Validate input dimensions
+        if u.shape not in [(self.n_u,), (1, self.n_u)]:
+            raise ValueError(
+                f"u must have shape ({self.n_u},) or (1, {self.n_u}), "
+                f"but got {u.shape}."
+            )
+
+        # Compute the state derivative based on the control input.
         dx = u[0]  # x_dot = u_x
         dy = u[1]  # y_dot = u_y
-        return ca.horzcat(dx, dy)
+        dxdt = ca.horzcat(dx, dy)
+
+        # Return the state derivative
+        return dxdt
 
     def solve(
         self,
         x_0: np.ndarray,
         x_goal: np.ndarray,
-        x_pred: list[np.ndarray],
         w_curr: np.ndarray,
         w_target: np.ndarray,
         use_warm_start: bool = True,
-        sol: ca.OptiSol | None = None,
+        sol_prev: ca.OptiSol | None = None,
+        **kwargs,
     ) -> tuple[np.ndarray, np.ndarray, float, float]:
         """
         Solve the NMPC problem.
@@ -318,23 +195,22 @@ class MPC:
         Args:
             x_0 (np.ndarray): initial state of the ego agent (n_x, )
             x_goal (np.ndarray): goal state of the ego agent (n_x, )
-            x_pred (list[np.ndarray]): predicted states of agents (K, n_x, m-1)
             w_curr (np.ndarray): current winding number w.r.t. agents (m-1, )
             w_target (np.ndarray): target winding number w.r.t. agents (m-1, )
             use_warm_start (bool, optional): whether to use the previous solution for
                 warm starting
-            sol (ca.OptiSol | None, optional): previous solution for warm starting
+            sol_prev (ca.OptiSol | None, optional): previous solution for warm starting
 
         Returns:
-            u (np.ndarray): optimal control input trajectory (n_u, K)
-            x_pred (np.ndarray): predicted state trajectory of the ego agent (n_x, K+1)
+            u_opt (np.ndarray): optimal control input trajectory (K, n_u)
+            x_opt (np.ndarray): predicted state trajectory of the ego agent (K+1, n_x)
             cost (float): optimal cost
-            solve_time (float): time taken to solve the OCP in seconds (CPU time)
+            t_sol (float): time taken to solve the OCP in seconds (CPU time)
 
         Raises:
             RuntimeError: if the OCP has not been initialized yet.
             ValueError: if the input arguments have incorrect shapes.
-            ValueError: if use_warm_start is True but sol is not provided.
+            ValueError: if use_warm_start is True but sol_prev is not provided.
             RuntimeError: if the OCP solver fails to find a solution.
         """
         # Check if the OCP has been initialized
@@ -344,60 +220,16 @@ class MPC:
                 "initialize_ocp() method before calling solve()."
             )
 
-        # Validate inputs
-        if x_0.shape != (self.n_x,):
-            raise ValueError(f"x_0 must have shape ({self.n_x},), but got {x_0.shape}.")
-        if x_goal.shape != (self.n_x,):
-            raise ValueError(
-                f"x_goal must have shape ({self.n_x},), but got {x_goal.shape}."
-            )
-        if x_pred.shape[2] != self.m - 1:
-            raise ValueError(
-                f"x_pred must have shape ({self.K}, {self.n_x}, {self.m - 1}), "
-                f"but got {x_pred.shape}."
-            )
-        for j in range(self.m - 1):
-            if x_pred[:, :, j].shape != (self.K, self.n_x):
-                raise ValueError(
-                    f"x_pred[{j}] must have shape ({self.K}, {self.n_x}), "
-                    f"got {x_pred[:, :, j].shape} instead."
-                )
-        if w_curr.shape != (self.m - 1,):
-            raise ValueError(
-                f"w_curr must have shape ({self.m - 1},), but got {w_curr.shape}."
-            )
-        if w_target.shape != (self.m - 1,):
-            raise ValueError(
-                f"w_target must have shape ({self.m - 1},), but got {w_target.shape}."
-            )
-        if sol is not None and not isinstance(sol, ca.OptiSol):
-            raise ValueError(
-                f"sol must be of type casadi.OptiSol or None, but got {type(sol)}."
-            )
-        if sol is not None and sol is None:
-            raise ValueError("use_warm_start is True but sol was not provided.")
-
-        # Set parameters in OCP
-        self.ocp.set_value(self.x_0, x_0)
-        self.ocp.set_value(self.x_goal, x_goal)
-        self.ocp.set_value(self.w_curr, w_curr)
-        self.ocp.set_value(self.w_target, w_target)
-        for j in range(self.m - 1):
-            self.ocp.set_value(self.x_pred[j], x_pred[:, :, j])
-
-        # Warm start
-        if use_warm_start is True and self.sol is not None:
-            self.ocp.set_initial(self.sol.value_variables())
-        elif self.sol is None:
-            # warm start on 1st solution to avoid numerical errors
-            # See: https://github.com/casadi/casadi/discussions/3539
-            # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-"NaN-detected"in-my-optimization%3F  # pylint: disable=line-too-long
-            for k in range(self.K + 1):
-                self.ocp.set_initial(self.x[k, :], x_0)
-        else:
-            # No warm start
-            # CHECKME: check if this case leads to issues
-            pass
+        # Call the solve method implemented in the subclass
+        self.sol = self._solve(
+            x_0,
+            x_goal,
+            w_curr,
+            w_target,
+            use_warm_start,
+            sol_prev,
+            **kwargs,
+        )
 
         # Solve OCP
         self.sol = self.ocp.solve()
@@ -415,94 +247,36 @@ class MPC:
         # Return the solution
         return u, x, c, t
 
-    def _check_cost(self) -> tuple[float, float, float, float]:
-        """
-        Compute the cost function value for the current solution. This method is mainly
-        intended for debugging and analysis purposes, as the cost value is already
-        computed by the solver and can be extracted from the solution object.
+    @abstractmethod
+    def _solve(
+        self,
+        x_0: np.ndarray,
+        x_goal: np.ndarray,
+        w_curr: np.ndarray,
+        w_target: np.ndarray,
+        use_warm_start: bool = True,
+        sol_prev: ca.OptiSol | None = None,
+        **kwargs,
+    ) -> ca.OptiSol:
+        raise NotImplementedError(
+            "The _solve() method must be implemented in a subclass of MPC."
+        )
 
-        Note: this method must be called immediately after solving the OCP as the
-            solution gets overwritten upon switching to the next agent. To
+    @abstractmethod
+    def _check_cost(self) -> float:
+        """
+        Compute the cost function value for the current solution. This is a helper
+        method intended for debugging and testing.
 
         Args:
             None
 
         Returns:
-            cost (float): value of the cost function for the current solution
-            goal_cost (float): contribution of the goal tracking term to the total cost
-            control_cost (float): contribution of control input term to the total cost
-            winding_cost (float): contribution of the winding term to the total cost
+            float: optimal cost
 
         Raises:
-            RuntimeError: if the OCP has not been solved yet (no solution available).
-            ValueError: if the sum of the cost components does not match the total cost.
+            RuntimeError: if the OCP has not been solved yet.
         """
-        # Check if OCP is initialized
-        if self.sol is None:
-            raise RuntimeError(
-                "No solution available. Please solve the OCP before calling "
-                "_check_cost()."
-            )
-
-        # Extract the OCP parameters and solution values
-        x = self.sol.value(self.x)
-        x_goal = self.sol.value(self.x_goal)
-        x_pred = [self.sol.value(x_pred_j) for x_pred_j in self.x_pred]
-        w_curr = self.sol.value(self.w_curr)
-        w_target = self.sol.value(self.w_target)
-        u = self.sol.value(self.u)
-
-        # Goal tracking cost
-        goal_cost = 0
-        if self.alpha_goal is not None and self.alpha_goal > 0:
-            for k in range(self.K + 1):
-                goal_cost += self.alpha_goal * (
-                    (x[k, 0] - x_goal[0]) ** 2 + (x[k, 1] - x_goal[1]) ** 2
-                )
-
-        # Control input cost
-        control_cost = 0
-        if self.alpha_u is not None and self.alpha_u > 0:
-            for k in range(self.K):
-                control_cost += self.alpha_u * (u[k, :].T @ self.R @ u[k, :])
-
-        # Winding cost
-        winding_cost = 0
-        if self.alpha_w is not None and np.any(self.alpha_w > 0):
-            for j in range(self.m - 1):
-
-                # Get weight for agent j
-                if isinstance(self.alpha_w, np.ndarray):
-                    self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
-                    alpha_w_j = self.alpha_w[j]
-                else:
-                    alpha_w_j = self.alpha_w
-
-                # Compute winding number w.r.t. j at the end of prediction horizon
-                w: float = w_curr[j]
-                for k in range(1, self.K + 1):
-                    theta: float = np.atan2(
-                        x[k, 1] - x_pred[j][k, 1],
-                        x[k, 0] - x_pred[j][k, 0],
-                    )
-                    theta_prev: float = np.atan2(
-                        x[k - 1, 1] - x_pred[j][k - 1, 1],
-                        x[k - 1, 0] - x_pred[j][k - 1, 0],
-                    )
-                    w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
-
-                # Cumulate winding costs
-                winding_cost += alpha_w_j * (w_target[j] - w) ** 2
-
-        # Total cost
-        cost = goal_cost + control_cost + winding_cost
-
-        # Check if the sum of the cost components matches the total cost
-        if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-4):
-            raise ValueError(
-                f"Cost check failed: the sum of the cost components ({cost}) does not "
-                "match the total cost value from the solution "
-                f"({self.sol.value(self.cost_function)})."
-            )
-
-        return cost, goal_cost, control_cost, winding_cost
+        raise NotImplementedError(
+            "The _check_cost() method must be implemented in a subclass of MPC."
+        )
