@@ -11,11 +11,11 @@ class CentralizedMPC(MPC):
     Centralized MPC controller class.
 
     The main structure of the class and of the OCP formulation is the same as for the
-    base MPC class, but the OCP is formulated in a centralized way, meaning that the
+    distributed MPC, but the OCP is formulated in a centralized way, meaning that the
     cost, dynamics, and constraints, of all the agents are included in a single
     optimization problem. This also means that, differently from the local MPC
     controller, the variables and parameters of this class contain the data for all the
-    agents, and thus tehy have an extra dimension of length m(number of agents).
+    agents, and thus they have an extra dimension of length m (number of agents).
     Additionally, the centralized OCP does not need the predicted trajectories of the
     other agents, as all the trajectories are optimized simultaneously.
     """
