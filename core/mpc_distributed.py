@@ -9,6 +9,7 @@ class DistributedMPC(MPC):
 
     def __init__(self):
         super().__init__()
+        self.architecture = "distributed"
         self.solver_options["max_wall_time"] = 60.0  # [s]
         self.solver_options["max_cpu_time"] = 60.0  # [s]
 
@@ -70,6 +71,9 @@ class DistributedMPC(MPC):
                 self.ocp.subject_to(self.u[k, :] <= self.u_max)
 
         # Input rate constraints
+        # NOTE: the previous u (i.e., the one applied at the previous time step) should
+        # also be taken into account to constraint u[0], but for simplicity we only
+        # constraint the rate between the optimization variables (at least for now).
         if self.u_rate_min is not None and self.u_rate_max is not None:
             if self.u_rate_min.shape != (1, self.n_u):
                 self.u_rate_min = self.u_rate_min.reshape(1, self.n_u)

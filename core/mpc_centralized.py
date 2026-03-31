@@ -22,6 +22,7 @@ class CentralizedMPC(MPC):
 
     def __init__(self) -> None:
         super().__init__()
+        self.architecture = "centralized"
         self.solver_options["max_wall_time"] = 600.0  # [s]
         self.solver_options["max_cpu_time"] = 600.0  # [s]
 
@@ -42,7 +43,7 @@ class CentralizedMPC(MPC):
         # Constraints
         # Initial state constraint
         for i in range(self.m):
-            self.ocp.subject_to(self.x[i][0, :] == self.x_0[:, i])
+            self.ocp.subject_to(self.x[i][0, :] == self.x_0[:, i].T)
 
         # Dynamics
         for i in range(self.m):
@@ -52,6 +53,10 @@ class CentralizedMPC(MPC):
 
         # State constraints
         if self.x_min is not None and self.x_max is not None:
+            if self.x_min.shape != (1, self.n_x):
+                self.x_min = self.x_min.reshape(1, self.n_x)
+            if self.x_max.shape != (1, self.n_x):
+                self.x_max = self.x_max.reshape(1, self.n_x)
             for i in range(self.m):
                 for k in range(self.K + 1):
                     self.ocp.subject_to(self.x_min <= self.x[i][k, :])
@@ -59,6 +64,10 @@ class CentralizedMPC(MPC):
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:
+            if self.u_min.shape != (1, self.n_u):
+                self.u_min = self.u_min.reshape(1, self.n_u)
+            if self.u_max.shape != (1, self.n_u):
+                self.u_max = self.u_max.reshape(1, self.n_u)
             for i in range(self.m):
                 for k in range(self.K):
                     self.ocp.subject_to(self.u_min <= self.u[i][k, :])
@@ -69,6 +78,10 @@ class CentralizedMPC(MPC):
         # also be taken into account to constraint u[0], but for simplicity we only
         # constraint the rate between the optimization variables (at least for now).
         if self.u_rate_min is not None and self.u_rate_max is not None:
+            if self.u_rate_min.shape != (1, self.n_u):
+                self.u_rate_min = self.u_rate_min.reshape(1, self.n_u)
+            if self.u_rate_max.shape != (1, self.n_u):
+                self.u_rate_max = self.u_rate_max.reshape(1, self.n_u)
             for i in range(self.m):
                 for k in range(self.K - 1):
                     self.ocp.subject_to(
@@ -102,19 +115,19 @@ class CentralizedMPC(MPC):
             for i in range(self.m):
                 for k in range(self.K + 1):
                     self.cost_function += self.alpha_g * (
-                        (self.x[i][k, 0] - self.x_goal[i, 0]) ** 2
-                        + (self.x[i][k, 1] - self.x_goal[i, 1]) ** 2
+                        (self.x[i][k, 0] - self.x_goal[0, i]) ** 2
+                        + (self.x[i][k, 1] - self.x_goal[1, i]) ** 2
                     )
 
         # Terminal goal tracking cost
         if self.alpha_g_progress is not None and self.alpha_g_progress > 0:
             for i in range(self.m):
                 delta_goal: float = (
-                    (self.x[i][self.K, 0] - self.x_goal[i, 0]) ** 2
-                    + (self.x[i][self.K, 1] - self.x_goal[i, 1]) ** 2
+                    (self.x[i][self.K, 0] - self.x_goal[0, i]) ** 2
+                    + (self.x[i][self.K, 1] - self.x_goal[1, i]) ** 2
                 ) - (
-                    (self.x[i][0, 0] - self.x_goal[i, 0]) ** 2
-                    + (self.x[i][0, 1] - self.x_goal[i, 1]) ** 2
+                    (self.x[i][0, 0] - self.x_goal[0, i]) ** 2
+                    + (self.x[i][0, 1] - self.x_goal[1, i]) ** 2
                 )
                 self.cost_function += self.alpha_g_progress * delta_goal
 

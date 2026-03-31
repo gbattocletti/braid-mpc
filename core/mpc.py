@@ -17,6 +17,7 @@ class MPC(ABC):
             None
         """
         # MPC parameters
+        self.architecture: str = "centralized"  # {"centralized", "distributed"}
         self.dt: float | None = None  # time step
         self.K: int | None = None  # prediction horizon
         self.m: int | None = None  # number of agents
@@ -193,17 +194,17 @@ class MPC(ABC):
         Solve the NMPC problem.
 
         Args:
-            x_0 (np.ndarray): initial state of the ego agent (n_x, )
-            x_goal (np.ndarray): goal state of the ego agent (n_x, )
-            w_curr (np.ndarray): current winding number w.r.t. agents (m-1, )
-            w_target (np.ndarray): target winding number w.r.t. agents (m-1, )
+            x_0 (np.ndarray): initial state
+            x_goal (np.ndarray): goal state
+            w_curr (np.ndarray): current winding numbers
+            w_target (np.ndarray): target winding numbers
             use_warm_start (bool, optional): whether to use the previous solution for
                 warm starting
             sol_prev (ca.OptiSol | None, optional): previous solution for warm starting
 
         Returns:
-            u_opt (np.ndarray): optimal control input trajectory (K, n_u)
-            x_opt (np.ndarray): predicted state trajectory of the ego agent (K+1, n_x)
+            u_opt (np.ndarray | list[np.ndarray]): optimal control input trajectory
+            x_opt (np.ndarray | list[np.ndarray]): optimal state trajectory
             cost (float): optimal cost
             t_sol (float): time taken to solve the OCP in seconds (CPU time)
 
@@ -237,15 +238,21 @@ class MPC(ABC):
             raise RuntimeError("MPC optimization failed: " + self.sol.stats()["status"])
 
         # Extract the OCP solution
-        u: np.ndarray = self.sol.value(self.u)
-        x: np.ndarray = self.sol.value(self.x)
+        if self.architecture == "distributed":
+            u_opt: np.ndarray = self.sol.value(self.u)
+            x_opt: np.ndarray = self.sol.value(self.x)
+        elif self.architecture == "centralized":
+            u_opt: list[np.ndarray] = [self.sol.value(self.u[i]) for i in range(self.m)]
+            x_opt: list[np.ndarray] = [self.sol.value(self.x[i]) for i in range(self.m)]
+        else:
+            raise ValueError(f"Invalid architecture: {self.architecture}")
         c: float = self.sol.value(self.cost_function)
         t: float = self.sol.stats()[
             "t_proc_total"
         ]  # CPU time. Alternative: t_wall_total for wall time
 
         # Return the solution
-        return u, x, c, t
+        return u_opt, x_opt, c, t
 
     @abstractmethod
     def _solve(
