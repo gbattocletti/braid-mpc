@@ -10,7 +10,7 @@ import numpy as np
 
 # Robotarium boundaries
 # See: https://github.com/robotarium/robotarium_python_simulator/blob/master/rps/robotarium_abc.py  pylint: disable=line-too-long
-BOUNDARIES_POS = [0, 0, 10, 10]  # [x_min, y_min, x_max, y_max]
+BOUNDARIES_POS = [-1.6, -1, 0.4, 1]  # [x_min, y_min, x_max, y_max] square workspace
 BOUNDARIES_VEL = [-0.2, -0.2, 0.2, 0.2]  # [x_min, y_min, x_max, y_max]
 
 
@@ -84,16 +84,17 @@ def robotarium2real(
             raise ValueError("Invalid coords_type. Must be 'position' or 'velocity'.")
 
     # Normalize Robotarium coordinates to [0, 1]
-    x_normalized = (x - np.array([boundaries[0], boundaries[1]])) / np.array(
+    x_normalized = (x - np.array([boundaries[0], boundaries[1], 0])) / np.array(
         [
             boundaries[2] - boundaries[0],
             boundaries[3] - boundaries[1],
+            1,
         ]
     )
 
     # Scale to real-world size and shift to real-world origin
     real_coords = x_normalized * np.array(
-        [x_lim[1] - x_lim[0], y_lim[1] - y_lim[0]]
-    ) + np.array([x_lim[0], y_lim[0]])
+        [x_lim[1] - x_lim[0], y_lim[1] - y_lim[0], 1]
+    ) + np.array([x_lim[0], y_lim[0], 0])
 
     return real_coords

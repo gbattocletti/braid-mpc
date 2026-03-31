@@ -55,14 +55,14 @@ mpc_distributed.dt = dt
 mpc_distributed.K = K
 mpc_distributed.m = m
 mpc_distributed.alpha_u = 0.001
-mpc_distributed.alpha_goal = 1.0
-mpc_distributed.alpha_w = 1.0
+mpc_distributed.alpha_goal = 1000.0
+mpc_distributed.alpha_w = 0
 mpc_distributed.R = np.diag([1, 1])
 mpc_distributed.u_min = np.array([-0.625, -0.625])
 mpc_distributed.u_max = np.array([0.625, 0.625])
 mpc_distributed.x_min = np.array([0, 0])
 mpc_distributed.x_max = np.array([10, 10])
-mpc_distributed.d_min = 0.4  # slightly larger than needed
+mpc_distributed.d_min = 0.01  # slightly larger than needed
 mpc_distributed.initialize_ocp()
 
 # Initialize helper variables
@@ -92,20 +92,21 @@ if USE_ROBOTARIUM is True:
     x_meas = r.get_poses()
 
 ## Main simulation loop ################################################################
-T = 50  # total simulation time (s)
+T = 20  # total simulation time (s)
 time = np.arange(0, T + dt, dt)
 for t in time:
 
     # Compute current and target winding numbers
     # NOTE: currently the time progresses constantly along the braid
     tau = t / T  # time n
-    tau_target = (t + K * dt) / T
-    w_curr = windings[int(tau * n_windings), :, :]
-    w_target = windings[int(tau_target * n_windings), :, :]
+    w_curr = windings[int(tau * (n_windings - 1)), :, :]
+    tau_target = min((t + K * dt) / T, 1)  # cap target time at the end of the braid
+    w_target = windings[int(tau_target * (n_windings - 1)), :, :]
 
     # Iterate over agents and solve their local MPC problems and apply control inputs
     for i in range(m):
         ego_agent = M[i]
+        x_start = ego_agent.x  # for debugging only
 
         # Solve local MPC problem for the ego agent
         (u_opt, x_opt, cost, t_sol) = mpc_distributed.solve(
@@ -120,7 +121,6 @@ for t in time:
 
         # Extract solution and apply control input
         if USE_ROBOTARIUM is True:
-
             v_vec[:, i] = robotarium_bridge.real2robotarium(
                 u_opt[0],
                 [mpc_distributed.u_min[0][0], mpc_distributed.u_max[0][0]],
@@ -134,7 +134,12 @@ for t in time:
 
         # Print debug info
         if DEBUG is True:
-            print(f"Time: {t:.2f} s, Agent {i}, Control input: {u_opt[0]}")
+            print(
+                f"t: {t:5.2f}s, i: {i}, x(k): [{x_start[0]:5.2f},{x_start[1]:5.2f}], "
+                f"x(k+1): [{ego_agent.x[0]:5.2f},{ego_agent.x[1]:5.2f}], "
+                f"u*(0|k): [{u_opt[0][0]: 4.2f},{u_opt[0][1]: 4.2f}], "
+                f"t_sol: {t_sol:.2f}s, cost: {cost:.2f}"
+            )
 
     # Simulate with Robotarium
     if USE_ROBOTARIUM is True:
@@ -151,7 +156,7 @@ for t in time:
                 [mpc_distributed.x_min[0][0], mpc_distributed.x_max[0][0]],
                 [mpc_distributed.x_min[0][1], mpc_distributed.x_max[0][1]],
                 coords_type="position",
-            )
+            )[0:-1]
             M[i].x = x_pred_new[0, :, i]
 
     # Update variables for the next iteration
