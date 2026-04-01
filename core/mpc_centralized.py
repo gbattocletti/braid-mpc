@@ -104,8 +104,10 @@ class CentralizedMPC(MPC):
                     if i == j:
                         continue  # skip self-collision
                     for k in range(self.K + 1):
-                        dist = ca.norm_2(self.x[i][k, :] - self.x[j][k, :])
-                        self.ocp.subject_to(dist >= self.d_min)
+                        dist = (self.x[i][k, 0] - self.x[j][k, 0]) ** 2 + (
+                            self.x[i][k, 1] - self.x[j][k, 1]
+                        ) ** 2
+                        self.ocp.subject_to(dist >= self.d_min**2)
 
         # Cost function
         self.cost_function = 0
@@ -113,23 +115,11 @@ class CentralizedMPC(MPC):
         # Goal tracking cost
         if self.alpha_g is not None and self.alpha_g > 0:
             for i in range(self.m):
-                for k in range(self.K + 1):
+                for k in range(1, self.K + 1):
                     self.cost_function += self.alpha_g * (
                         (self.x[i][k, 0] - self.x_goal[0, i]) ** 2
                         + (self.x[i][k, 1] - self.x_goal[1, i]) ** 2
                     )
-
-        # Terminal goal tracking cost
-        if self.alpha_g_progress is not None and self.alpha_g_progress > 0:
-            for i in range(self.m):
-                delta_goal: float = (
-                    (self.x[i][self.K, 0] - self.x_goal[0, i]) ** 2
-                    + (self.x[i][self.K, 1] - self.x_goal[1, i]) ** 2
-                ) - (
-                    (self.x[i][0, 0] - self.x_goal[0, i]) ** 2
-                    + (self.x[i][0, 1] - self.x_goal[1, i]) ** 2
-                )
-                self.cost_function += self.alpha_g_progress * delta_goal
 
         # Control input cost
         if self.alpha_u is not None and self.alpha_u > 0:

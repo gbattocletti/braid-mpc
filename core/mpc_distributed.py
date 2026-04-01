@@ -91,32 +91,25 @@ class DistributedMPC(MPC):
         # Collision avoidance constraints
         # NOTE: the distance constraint is only computed w.r.t. other agents, and not
         # w.r.t. itself. Therefore only m-1 constraints are considered here.
+        # NOTE: a squared distance constraint is used to avoid numerical issues.
         if self.d_min is not None:
             for j in range(self.m - 1):
                 for k in range(self.K):
-                    dist = ca.norm_2(self.x[k, :] - self.x_pred[j][k, :])
-                    self.ocp.subject_to(dist >= self.d_min)
+                    dist = (self.x[k, 0] - self.x_pred[j][k, 0]) ** 2 + (
+                        self.x[k, 1] - self.x_pred[j][k, 1]
+                    ) ** 2
+                    self.ocp.subject_to(dist >= self.d_min**2)
 
         # Cost function
         self.cost_function = 0
 
         # Goal tracking cost (terminal cost)
         if self.alpha_g is not None and self.alpha_g > 0:
-            self.cost_function += self.alpha_g * (
-                (self.x[self.K, 0] - self.x_goal[0]) ** 2
-                + (self.x[self.K, 1] - self.x_goal[1]) ** 2
-            )
-
-        # Goal progress cost (terminal cost)
-        if self.alpha_g_progress is not None and self.alpha_g_progress > 0:
-            delta_goal = (
-                (self.x[self.K, 0] - self.x_goal[0]) ** 2
-                + (self.x[self.K, 1] - self.x_goal[1]) ** 2
-            ) - (
-                (self.x[0, 0] - self.x_goal[0]) ** 2
-                + (self.x[0, 1] - self.x_goal[1]) ** 2
-            )
-            self.cost_function += self.alpha_g_progress * delta_goal
+            for k in range(1, self.K + 1):
+                self.cost_function += self.alpha_g * (
+                    (self.x[k, 0] - self.x_goal[0]) ** 2
+                    + (self.x[k, 1] - self.x_goal[1]) ** 2
+                )
 
         # Control input cost
         if self.alpha_u is not None and self.alpha_u > 0:
