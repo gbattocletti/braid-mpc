@@ -13,10 +13,11 @@ from utils import invariants, robotarium_bridge
 from visualization import plot
 
 ## Settings ############################################################################
-DEBUG = True
+DATA = grids_2  # initial and goal locations, topological specification
+CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
+USE_ROBOTARIUM = True  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = False
-USE_ROBOTARIUM = True
-DATA = grids_2
+DEBUG = True
 
 ## Preprocessing #######################################################################
 np.random.seed(1312)
@@ -57,8 +58,12 @@ for i in range(m):
 # scaled manually to match the robotarium's velocity limits, depending on the scaling
 # factor used between the robotarium environment size and the 'real world' environment
 # size. Otherwise, the robot's velocity will be different than expected.
-# mpc = mpc_distributed.DistributedMPC()
-mpc = mpc_centralized.CentralizedMPC()
+if CONTROL_ARCHITECTURE == "distributed":
+    mpc = mpc_distributed.DistributedMPC()
+elif CONTROL_ARCHITECTURE == "centralized":
+    mpc = mpc_centralized.CentralizedMPC()
+else:
+    raise ValueError(f"Invalid control architecture: {CONTROL_ARCHITECTURE}")
 mpc.dt = dt
 mpc.K = K
 mpc.m = m
