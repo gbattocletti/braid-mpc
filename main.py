@@ -1,8 +1,12 @@
+# pylint: disable=unused-import
+from typing import Callable
+
+import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 import rps.robotarium as rb
+import rps.utilities.transformations
 
-# pylint: disable=unused-import
 from core import agent, mpc_centralized, mpc_distributed
 from data import grids_1, grids_2
 from utils import invariants, robotarium_bridge
@@ -10,16 +14,18 @@ from visualization import plot
 
 ## Settings ############################################################################
 DEBUG = True
+SHOW_PLOTS = False
 USE_ROBOTARIUM = True
-data = grids_2
-np.random.seed(1312)
+DATA = grids_2
 
 ## Preprocessing #######################################################################
+np.random.seed(1312)
+
 # Load input data
-m = data.m
-grids = data.grids  # topological specification
-x_init = data.x_init
-x_goal = data.x_goal
+m = DATA.m
+grids = DATA.grids  # topological specification
+x_init = DATA.x_init
+x_goal = DATA.x_goal
 
 # Convert grids to paths
 paths = invariants.grids2paths(grids)
@@ -51,20 +57,20 @@ for i in range(m):
 # scaled manually to match the robotarium's velocity limits, depending on the scaling
 # factor used between the robotarium environment size and the 'real world' environment
 # size. Otherwise, the robot's velocity will be different than expected.
-mpc = mpc_distributed.DistributedMPC()
-# mpc = mpc_centralized.CentralizedMPC()
+# mpc = mpc_distributed.DistributedMPC()
+mpc = mpc_centralized.CentralizedMPC()
 mpc.dt = dt
 mpc.K = K
 mpc.m = m
-mpc.alpha_u = 0
-mpc.alpha_g = 1000.0
+mpc.alpha_u = 0.001
+mpc.alpha_g = 1.0
 mpc.alpha_w = 0
 mpc.R = np.diag([1, 1])
 mpc.u_min = np.array([-0.625, -0.625])
 mpc.u_max = np.array([0.625, 0.625])
 mpc.x_min = np.array([0, 0])
 mpc.x_max = np.array([10, 10])
-mpc.d_min = 0.05  # slightly larger than needed
+mpc.d_min = 0.01  # slightly larger than needed
 mpc.initialize_ocp()
 
 # Initialize helper variables
@@ -80,6 +86,7 @@ v_vec = np.zeros((2, m))  # only used for robotarium
 
 ## Simulation setup ####################################################################
 if USE_ROBOTARIUM is True:
+    # Initialize robotarium
     x_init_robotarium: np.ndarray = np.vstack(
         [
             robotarium_bridge.real2robotarium(
@@ -88,7 +95,7 @@ if USE_ROBOTARIUM is True:
                 [mpc.x_min[0][1], mpc.x_max[0][1]],
                 coords_type="position",
             ).T,
-            np.zeros([1, m]),
+            np.zeros([1, m]),  # orientation [rad]
         ]
     )
     r = rb.Robotarium(
@@ -97,7 +104,55 @@ if USE_ROBOTARIUM is True:
         show_figure=True,
         sim_in_real_time=True,
     )
-    x_meas = r.get_poses()
+    x_meas = r.get_poses()  # get states in robotarium
+
+    # Create transformation from single integrator to unicycle dynamics (for robotarium)
+    si_to_uni_dyn: Callable = rps.utilities.transformations.create_si_to_uni_dynamics()
+
+    # Plot relevant information
+    colors = plt.color_sequences["tab10"][:m]
+    rect = patches.Rectangle(
+        (-1.6, -1), 2, 2, linewidth=2, edgecolor="black", facecolor="none"
+    )
+    r.axes.add_patch(rect)  # plot environment boundary
+    r.axes.set_xlim(-1.6, 0.4)  # override robotarium default limits
+    r.axes.set_ylim(-1, 1)  # TODO: use robotarium_bridge + real limits
+    r.axes.set_aspect("equal", adjustable="box")
+    r.axes.grid(
+        True,
+        which="major",
+        linestyle=":",
+        color="gray",
+        linewidth=0.5,
+        zorder=1,
+    )
+    r.axes.grid(
+        True,
+        which="minor",
+        linestyle=":",
+        color="gray",
+        linewidth=0.3,
+        zorder=1,
+    )
+    for i in range(m):
+        x_goal_robotrium = robotarium_bridge.real2robotarium(
+            x_goal[:, i],
+            [mpc.x_min[0][0], mpc.x_max[0][0]],
+            [mpc.x_min[0][1], mpc.x_max[0][1]],
+            coords_type="position",
+        )
+        r.axes.plot(
+            x_init_robotarium[0, i],
+            x_init_robotarium[1, i],
+            "o",
+            color=colors[i],
+        )  # plot initial position
+        r.axes.plot(
+            x_goal_robotrium[0],
+            x_goal_robotrium[1],
+            "*",
+            color=colors[i],
+        )  # plot goal position
 
 ## Main simulation loop ################################################################
 T = 20  # total simulation time (s)
@@ -114,10 +169,13 @@ for t in time:
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
         # Collect predicted trajectories of all agents
-        # TODO: check dimensions and indexing
         for i in range(m):
             x_pred[0:, :, i] = M[i].x
-            x_pred[1:, :, i] = M[i].x_opt[2:]
+            if M[i].x_opt is None:
+                x_pred[1:, :, i] = M[i].x  # use constant state as predicted trajectory
+                # x_pred = np.zeros([K, 2, m])
+            else:
+                x_pred[1:, :, i] = M[i].x_opt[2:]
 
         # Solve local MPC problem for each agent
         for i in range(m):
@@ -164,6 +222,8 @@ for t in time:
 
     # 3. Take one step in the environment and get new state
     if USE_ROBOTARIUM is True:
+
+        # Convert optimal control inputs to robotarium velocities
         for i in range(m):
             v_vec[:, i] = robotarium_bridge.real2robotarium(
                 M[i].u_opt[0],
@@ -173,44 +233,51 @@ for t in time:
             )
 
         # Simulate with Robotarium
-        r.set_velocities(range(m), v_vec)
-        r.step()
+        # NOTE: The robotarium uses a fixed time step of 0.033s, so we need to call the
+        # step function multiple times to match the desired MPC time step (dt).
+        for _ in range(int(dt / r.time_step)):
+            v_vec = si_to_uni_dyn(v_vec, x_meas)  # convert to unicycle velocities
+            r.set_velocities(range(m), v_vec)
+            r.step()
+            x_meas = r.get_poses()  # get new states (required after each r.step())
 
-        # Get new states from Robotarium
-        # TODO: check dimensions and indexing
-        x_meas = r.get_poses()
+        # Update agent's states
         for i in range(m):
             M[i].x = robotarium_bridge.robotarium2real(
                 x_meas[:, i],
                 [mpc.x_min[0][0], mpc.x_max[0][0]],
                 [mpc.x_min[0][1], mpc.x_max[0][1]],
                 coords_type="position",
-            )
+            )[
+                :2
+            ]  # only keep (x, y) coordinates
 
     else:
+
         # Simulate step using agent's dynamics
         for i in range(m):
             M[i].step(M[i].u_opt[0])
 
     # 4. Print debug info
-    # TODO: check dimensions and indexing
     if DEBUG is True:
-        print(f"t: {t:5.2f}s", end="")
+        print(f"t: {t:5.2f}s")
         for i in range(m):
             print(
                 f"\ti: {i}, "
-                f"x(k): [{M[i].x_opt[0]:5.2f},{M[i].x_opt[1]:5.2f}], "
+                f"x(k): [{M[i].x_opt[0, 0]:5.2f},{M[i].x_opt[0, 1]:5.2f}], "
                 f"x(k+1): [{M[i].x[0]:5.2f},{M[i].x[1]:5.2f}], "
-                f"u*(0|k): [{M[i].u_opt[0]: 4.2f},{M[i].u_opt[1]: 4.2f}], "
+                f"u*(0|k): [{M[i].u_opt[0, 0]: 4.2f},{M[i].u_opt[0, 1]: 4.2f}], "
                 f"t_sol: {M[i].t_sol:.2f}s, "
                 f"cost: {M[i].cost:.2f}"
             )
 
 # Call robotarium termination function
-r.call_at_scripts_end()
+if USE_ROBOTARIUM is True:
+    r.call_at_scripts_end()
 
 ## Evaluate results and show plots #####################################################
 # TODO
 
 # Show all plots
-plt.show()
+if SHOW_PLOTS is True:
+    plt.show()
