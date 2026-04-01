@@ -42,7 +42,7 @@ def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     n, _, m = paths.shape
 
     # Create the plot
-    colors = plt.cm.get_cmap("tab10", m).colors
+    colors = plt.color_sequences["tab10"][:m]
     fig, ax = plt.subplots(figsize=figsize / 2.54)
     for t in range(n):
         for i in range(m):
@@ -112,7 +112,7 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     # Preprocess
     n, _, m = paths.shape  # Extract dimensions
     time = np.arange(n)  # Create time array for z-axis
-    colors = plt.cm.get_cmap("tab10", m).colors  # Define colormaps
+    colors = plt.color_sequences["tab10"][:m]  # Define colormaps
 
     # Create the plot
     fig: plt.Figure = plt.figure(figsize=figsize / 2.54)
@@ -180,7 +180,7 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
 
     # Create plot variables
     time = np.arange(n)  # Create time array for z-axis
-    colors = plt.cm.get_cmap("tab10", m).colors  # Define colormaps
+    colors = plt.color_sequences["tab10"][:m]  # Define colormaps
 
     # Create the plot
     plot_cols = 3
