@@ -40,6 +40,9 @@ class Agent:
         Returns:
             None
         """
+        # Validate input
+        if len(u) == 2:
+            u = np.append(u, 0)  # add dummy control input for heading
 
         # simple dynamics (single integrator): x_next = x_prev + u*dt
         self.x = self.x + u * self.dt

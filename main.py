@@ -14,8 +14,8 @@ from visualization import plot
 
 ## Settings ############################################################################
 DATA = grids_2  # initial and goal locations, topological specification
-CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
-USE_ROBOTARIUM = True  # otherwise, dynamics from the agents' objects is used
+CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
+USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = False
 DEBUG = True
 
@@ -25,8 +25,14 @@ np.random.seed(1312)
 # Load input data
 m = DATA.m
 grids = DATA.grids  # topological specification
-x_init = DATA.x_init
-x_goal = DATA.x_goal
+x_init = DATA.x_init.T
+x_goal = DATA.x_goal.T
+
+# Add orientation dimension to states if not included
+# NOTE: heading in x_init is used only for unicycle dynamic model, while goal heading
+# is ignored in cost function and is added only for dimension consistency.
+x_init = np.vstack([x_init, np.zeros([1, m])]) if x_init.shape[0] == 2 else x_init
+x_goal = np.vstack([x_goal, np.zeros([1, m])]) if x_goal.shape[0] == 2 else x_goal
 
 # Convert grids to paths
 paths = invariants.grids2paths(grids)
@@ -50,18 +56,15 @@ K = 20  # time steps
 M = [agent.Agent(i) for i in range(m)]
 for i in range(m):
     M[i].dt = dt
-    M[i].x = x_init[i, :]
-    M[i].x_goal = x_goal[i, :]
+    M[i].x = x_init[:, i]
+    M[i].x_goal = x_goal[:, i]
 
 # Initialize MPC controller
-# NOTE: when using the robotarium, the velocity limits (u limits) must currently be
-# scaled manually to match the robotarium's velocity limits, depending on the scaling
-# factor used between the robotarium environment size and the 'real world' environment
-# size. Otherwise, the robot's velocity will be different than expected.
+dynamics = "unicycle" if USE_ROBOTARIUM is True else "single_integrator"
 if CONTROL_ARCHITECTURE == "distributed":
-    mpc = mpc_distributed.DistributedMPC()
+    mpc = mpc_distributed.DistributedMPC(dynamics=dynamics)
 elif CONTROL_ARCHITECTURE == "centralized":
-    mpc = mpc_centralized.CentralizedMPC()
+    mpc = mpc_centralized.CentralizedMPC(dynamics=dynamics)
 else:
     raise ValueError(f"Invalid control architecture: {CONTROL_ARCHITECTURE}")
 mpc.dt = dt
@@ -71,38 +74,35 @@ mpc.alpha_u = 0.001
 mpc.alpha_g = 1.0
 mpc.alpha_w = 0
 mpc.R = np.diag([1, 1])
-mpc.u_min = np.array([-0.625, -0.625])
-mpc.u_max = np.array([0.625, 0.625])
+# NOTE: when using the robotarium, the velocity limits (u limits) must currently be
+# scaled manually to match the robotarium's velocity limits, depending on the scaling
+# factor used between the robotarium environment size and the 'real world' environment
+# size. Otherwise, the robot's velocity will be different than expected.
+mpc.u_min = np.array([-0.625, -1.25])
+mpc.u_max = np.array([0.625, 1.25])
 mpc.x_min = np.array([0, 0])
 mpc.x_max = np.array([10, 10])
-mpc.d_min = 0.01  # slightly larger than needed
+mpc.d_min = None  # slightly larger than needed
 mpc.initialize_ocp()
 
-# Initialize helper variables
-x_pred: np.ndarray | None
-if mpc.architecture == "distributed":
-    x_pred = np.zeros([K, 2, m])
-elif mpc.architecture == "centralized":
-    x_pred = None  # not needed for centralized MPC
-    x_goal = np.array([M[i].x_goal for i in range(m)]).T  # reshape to 2 x m
-
-# Initialize robotarium variables
-v_vec = np.zeros((2, m))  # only used for robotarium
+# Initialize helper variables (only for distributed MPC)
+x_pred = np.zeros([K, mpc.n_x, m]) if mpc.architecture == "distributed" else None
 
 ## Simulation setup ####################################################################
 if USE_ROBOTARIUM is True:
     # Initialize robotarium
-    x_init_robotarium: np.ndarray = np.vstack(
-        [
-            robotarium_bridge.real2robotarium(
-                x_init,
-                [mpc.x_min[0][0], mpc.x_max[0][0]],
-                [mpc.x_min[0][1], mpc.x_max[0][1]],
-                coords_type="position",
-            ).T,
-            np.zeros([1, m]),  # orientation [rad]
-        ]
+    x_init_robotarium: np.ndarray = robotarium_bridge.real2robotarium(
+        x_init,
+        [mpc.x_min[0][0], mpc.x_max[0][0]],
+        [mpc.x_min[0][1], mpc.x_max[0][1]],
     )
+    x_goal_robotarium = robotarium_bridge.real2robotarium(
+        x_goal,
+        [mpc.x_min[0][0], mpc.x_max[0][0]],
+        [mpc.x_min[0][1], mpc.x_max[0][1]],
+    )
+
+    # Initialize robotarium
     r = rb.Robotarium(
         number_of_robots=m,
         initial_conditions=x_init_robotarium,
@@ -111,8 +111,8 @@ if USE_ROBOTARIUM is True:
     )
     x_meas = r.get_poses()  # get states in robotarium
 
-    # Create transformation from single integrator to unicycle dynamics (for robotarium)
-    si_to_uni_dyn: Callable = rps.utilities.transformations.create_si_to_uni_dynamics()
+    # Initialize velocity vector for robotarium control inputs
+    v_vec = np.zeros((mpc.n_u, m))
 
     # Plot relevant information
     colors = plt.color_sequences["tab10"][:m]
@@ -121,7 +121,7 @@ if USE_ROBOTARIUM is True:
     )
     r.axes.add_patch(rect)  # plot environment boundary
     r.axes.set_xlim(-1.6, 0.4)  # override robotarium default limits
-    r.axes.set_ylim(-1, 1)  # TODO: use robotarium_bridge + real limits
+    r.axes.set_ylim(-1, 1)
     r.axes.set_aspect("equal", adjustable="box")
     r.axes.grid(
         True,
@@ -140,12 +140,6 @@ if USE_ROBOTARIUM is True:
         zorder=1,
     )
     for i in range(m):
-        x_goal_robotrium = robotarium_bridge.real2robotarium(
-            x_goal[:, i],
-            [mpc.x_min[0][0], mpc.x_max[0][0]],
-            [mpc.x_min[0][1], mpc.x_max[0][1]],
-            coords_type="position",
-        )
         r.axes.plot(
             x_init_robotarium[0, i],
             x_init_robotarium[1, i],
@@ -153,8 +147,8 @@ if USE_ROBOTARIUM is True:
             color=colors[i],
         )  # plot initial position
         r.axes.plot(
-            x_goal_robotrium[0],
-            x_goal_robotrium[1],
+            x_goal_robotarium[0, i],
+            x_goal_robotarium[1, i],
             "*",
             color=colors[i],
         )  # plot goal position
@@ -178,7 +172,6 @@ for t in time:
             x_pred[0:, :, i] = M[i].x
             if M[i].x_opt is None:
                 x_pred[1:, :, i] = M[i].x  # use constant state as predicted trajectory
-                # x_pred = np.zeros([K, 2, m])
             else:
                 x_pred[1:, :, i] = M[i].x_opt[2:]
 
@@ -203,7 +196,7 @@ for t in time:
     elif mpc.architecture == "centralized":
         # Collect initial states of all agents
         x_0 = [M[i].x for i in range(m)]
-        x_0 = np.array(x_0).T  # reshape to m x 2
+        x_0 = np.array(x_0).T  # reshape to m x n_x
 
         # Solve centralized MPC problem
         (u_opt, x_opt, cost, t_sol) = mpc.solve(
@@ -230,18 +223,16 @@ for t in time:
 
         # Convert optimal control inputs to robotarium velocities
         for i in range(m):
-            v_vec[:, i] = robotarium_bridge.real2robotarium(
+            v_vec[:, i] = robotarium_bridge.real2robotarium_vel(
                 M[i].u_opt[0],
-                [mpc.u_min[0][0], mpc.u_max[0][0]],
-                [mpc.u_min[0][1], mpc.u_max[0][1]],
-                coords_type="velocity",
+                mpc.u_min,
+                mpc.u_max,
             )
 
         # Simulate with Robotarium
         # NOTE: The robotarium uses a fixed time step of 0.033s, so we need to call the
         # step function multiple times to match the desired MPC time step (dt).
         for _ in range(int(dt / r.time_step)):
-            v_vec = si_to_uni_dyn(v_vec, x_meas)  # convert to unicycle velocities
             r.set_velocities(range(m), v_vec)
             r.step()
             x_meas = r.get_poses()  # get new states (required after each r.step())
@@ -252,10 +243,7 @@ for t in time:
                 x_meas[:, i],
                 [mpc.x_min[0][0], mpc.x_max[0][0]],
                 [mpc.x_min[0][1], mpc.x_max[0][1]],
-                coords_type="position",
-            )[
-                :2
-            ]  # only keep (x, y) coordinates
+            )
 
     else:
 
@@ -269,8 +257,9 @@ for t in time:
         for i in range(m):
             print(
                 f"\ti: {i}, "
-                f"x(k): [{M[i].x_opt[0, 0]:5.2f},{M[i].x_opt[0, 1]:5.2f}], "
-                f"x(k+1): [{M[i].x[0]:5.2f},{M[i].x[1]:5.2f}], "
+                f"x(k): [{M[i].x_opt[0, 0]:5.2f},{M[i].x_opt[0, 1]:5.2f},"
+                f"{M[i].x_opt[0, 2]:5.2f}], "
+                f"x(k+1): [{M[i].x[0]:5.2f},{M[i].x[1]:5.2f},{M[i].x[2]:5.2f}], "
                 f"u*(0|k): [{M[i].u_opt[0, 0]: 4.2f},{M[i].u_opt[0, 1]: 4.2f}], "
                 f"t_sol: {M[i].t_sol:.2f}s, "
                 f"cost: {M[i].cost:.2f}"

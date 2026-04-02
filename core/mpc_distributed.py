@@ -7,8 +7,8 @@ from utils import invariants
 
 class DistributedMPC(MPC):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, dynamics: str = "single_integrator") -> None:
+        super().__init__(dynamics=dynamics)
         self.architecture = "distributed"
         self.solver_options["max_wall_time"] = 60.0  # [s]
         self.solver_options["max_cpu_time"] = 60.0  # [s]
@@ -47,18 +47,18 @@ class DistributedMPC(MPC):
 
         # Dynamics
         for k in range(self.K):
-            x_next = self.x[k, :] + self.dxdt(self.u[k, :]) * self.dt
+            x_next = self.x[k, :] + self.dxdt(self.x[k, :], self.u[k, :]) * self.dt
             self.ocp.subject_to(self.x[k + 1, :] == x_next)
 
         # State constraints
         if self.x_min is not None and self.x_max is not None:
-            if self.x_min.shape != (1, self.n_x):
-                self.x_min = self.x_min.reshape(1, self.n_x)
-            if self.x_max.shape != (1, self.n_x):
-                self.x_max = self.x_max.reshape(1, self.n_x)
+            if self.x_min.shape != (1, self.n_x_pos):
+                self.x_min = self.x_min.reshape(1, self.n_x_pos)
+            if self.x_max.shape != (1, self.n_x_pos):
+                self.x_max = self.x_max.reshape(1, self.n_x_pos)
             for k in range(self.K + 1):
-                self.ocp.subject_to(self.x_min <= self.x[k, :])
-                self.ocp.subject_to(self.x[k, :] <= self.x_max)
+                self.ocp.subject_to(self.x_min <= self.x[k, : self.n_x_pos])
+                self.ocp.subject_to(self.x[k, : self.n_x_pos] <= self.x_max)
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:

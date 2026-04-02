@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Callable
 
 import casadi as ca
 import numpy as np
@@ -6,23 +7,37 @@ import numpy as np
 
 class MPC(ABC):
 
-    def __init__(self) -> None:
+    def __init__(self, dynamics: str = "single_integrator") -> None:
         """
         Initialize the MPC controller.
 
         Args:
-            None
+            dynamics: The dynamics model to use ("single_integrator" or "unicycle")
 
         Returns:
             None
         """
-        # MPC parameters
+        # Controller architecture
         self.architecture: str = "centralized"  # {"centralized", "distributed"}
+
+        # MPC dynamics
+        self.dynamics: str = dynamics  # {"single_integrator", "unicycle"}
+        self.dxdt: Callable[[ca.SX | ca.MX, ca.SX | ca.MX], ca.SX | ca.MX]
+        if self.dynamics == "single_integrator":
+            self.dxdt = self._dxdt_si
+        elif self.dynamics == "unicycle":
+
+            self.dxdt = self._dxdt_uni
+        else:
+            raise ValueError(f"Invalid dynamics: {self.dynamics}")
+
+        # MPC parameters
         self.dt: float | None = None  # time step
         self.K: int | None = None  # prediction horizon
         self.m: int | None = None  # number of agents
         self.n_u: int = 2  # number of control inputs
-        self.n_x: int = 2  # number of states
+        self.n_x: int = 3  # number of states
+        self.n_x_pos: int = 2  # number of position states
 
         # Optimization problem
         self.ocp: ca.Opti = ca.Opti()
@@ -70,9 +85,9 @@ class MPC(ABC):
         self.u_rate_min: np.ndarray | None = None
         self.u_rate_max: np.ndarray | None = None
         self.u_tot_max: float | None = None  # maximum total control input
-        self.x_min: np.ndarray | None = None
-        self.x_max: np.ndarray | None = None
-        self.d_min: float | None = None  # minimum distance between agents
+        self.x_min: np.ndarray | None = None  # minimum position state
+        self.x_max: np.ndarray | None = None  # maximum position state
+        self.d_min: float | None = None  # minimum distance between agents' positions
 
     def __call__(
         self,
@@ -144,22 +159,18 @@ class MPC(ABC):
             "The _initialize_ocp() method must be implemented in a subclass of MPC."
         )
 
-    def dxdt(
+    def _dxdt_si(
         self,
+        _: ca.SX | ca.MX,
         u: ca.SX | ca.MX,
     ) -> ca.SX | ca.MX:
         """
-        Continuous-time dynamics function for the MPC controller to be integrated
-        numerically within the MPC prediction model. The dynamics are defined as:
-            dxdt = f(x, u)
-
-        The state is structured as:
-            x = [x, y]^T
-
-        The control input is structured as:
-            u = [u_x, u_y]^T
+        Single integrator continuous-time dynamics function to be integrated
+        numerically within the MPC prediction model.
 
         Args:
+            _ (ca.SX or ca.MX): State vector (n_x, ). Unused but included for
+                consistency with the signature of dxdt functions for different dynamics.
             u (ca.SX or ca.MX): Control input vector (n_u, ).
 
         Returns:
@@ -175,7 +186,45 @@ class MPC(ABC):
         # Compute the state derivative based on the control input.
         dx = u[0]  # x_dot = u_x
         dy = u[1]  # y_dot = u_y
-        dxdt = ca.horzcat(dx, dy)
+        dz = 0  # dummy state derivative for heading, which is not used in si model
+        dxdt = ca.horzcat(dx, dy, dz)
+
+        # Return the state derivative
+        return dxdt
+
+    def _dxdt_uni(
+        self,
+        x: ca.SX | ca.MX,
+        u: ca.SX | ca.MX,
+    ) -> ca.SX | ca.MX:
+        """
+        Unicycle continuous-time dynamics function to be integrated numerically within
+        the MPC prediction model.
+
+        Args:
+            x (ca.SX or ca.MX): State vector (n_x, ).
+            u (ca.SX or ca.MX): Control input vector (n_u, ).
+
+        Returns:
+            dxdt (ca.SX or ca.MX): Time derivative of the state vector (n_x, ).
+        """
+        # Validate input dimensions
+        if x.shape not in [(self.n_x,), (1, self.n_x)]:
+            raise ValueError(
+                f"x must have shape ({self.n_x},) or (1, {self.n_x}), "
+                f"but got {x.shape}."
+            )
+        if u.shape not in [(self.n_u,), (1, self.n_u)]:
+            raise ValueError(
+                f"u must have shape ({self.n_u},) or (1, {self.n_u}), "
+                f"but got {u.shape}."
+            )
+
+        # Compute the state derivative based on the control input.
+        dx = u[0] * ca.cos(x[2])  # x_dot = u_x*cos(theta)
+        dy = u[0] * ca.sin(x[2])  # y_dot = u_y*sin(theta)
+        dtheta = u[1]  # theta_dot = u_theta
+        dxdt = ca.horzcat(dx, dy, dtheta)
 
         # Return the state derivative
         return dxdt

@@ -20,8 +20,8 @@ class CentralizedMPC(MPC):
     other agents, as all the trajectories are optimized simultaneously.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, dynamics: str = "single_integrator") -> None:
+        super().__init__(dynamics=dynamics)
         self.architecture = "centralized"
         self.solver_options["max_wall_time"] = 600.0  # [s]
         self.solver_options["max_cpu_time"] = 600.0  # [s]
@@ -48,19 +48,22 @@ class CentralizedMPC(MPC):
         # Dynamics
         for i in range(self.m):
             for k in range(self.K):
-                x_next = self.x[i][k, :] + self.dxdt(self.u[i][k, :]) * self.dt
+                x_next = (
+                    self.x[i][k, :]
+                    + self.dxdt(self.x[i][k, :], self.u[i][k, :]) * self.dt
+                )
                 self.ocp.subject_to(self.x[i][k + 1, :] == x_next)
 
         # State constraints
         if self.x_min is not None and self.x_max is not None:
-            if self.x_min.shape != (1, self.n_x):
-                self.x_min = self.x_min.reshape(1, self.n_x)
-            if self.x_max.shape != (1, self.n_x):
-                self.x_max = self.x_max.reshape(1, self.n_x)
+            if self.x_min.shape != (1, self.n_x_pos):
+                self.x_min = self.x_min.reshape(1, self.n_x_pos)
+            if self.x_max.shape != (1, self.n_x_pos):
+                self.x_max = self.x_max.reshape(1, self.n_x_pos)
             for i in range(self.m):
                 for k in range(self.K + 1):
-                    self.ocp.subject_to(self.x_min <= self.x[i][k, :])
-                    self.ocp.subject_to(self.x[i][k, :] <= self.x_max)
+                    self.ocp.subject_to(self.x_min <= self.x[i][k, : self.n_x_pos])
+                    self.ocp.subject_to(self.x[i][k, : self.n_x_pos] <= self.x_max)
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:
