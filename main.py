@@ -165,6 +165,9 @@ for t in time:
     tau_target = min((t + K * dt) / T, 1)  # cap target time at the end of the braid
     w_target = windings[int(tau_target * (n_windings - 1)), :, :]
 
+    # Compute winding number weights depending on distance between agents
+    alpha_w = invariants.compute_winding_weights(np.array([M[i].x for i in range(m)]))
+
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
         # Collect predicted trajectories of all agents

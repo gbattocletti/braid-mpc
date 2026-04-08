@@ -241,3 +241,41 @@ def paths2windings(
         theta_prev = theta
 
     return windings
+
+
+def compute_winding_weights(
+    positions: np.ndarray[float],
+    d_threshold: float | None = None,
+) -> np.ndarray:
+    """
+    Compute weights for the winding number cost term based on the distances
+    between agents. The weights are higher when agents are closer together and
+    lower when they are farther apart.
+
+    Args:
+        positions (np.ndarray): A 2D array of shape (m, 2) representing the current
+            positions of m agents in 2D space. Each entry positions[i, :] gives the
+            (x, y) coordinates of agent i.
+        d_threshold (float, optional): Distance after which the cost is considered
+            0. If None, the cost is not capped. Default is None.
+
+    Returns:
+        np.ndarray: A 2D array of shape (m, m) representing the weights for the
+            winding number cost between each pair of agents. The weights matrix is
+            symmetric, and has zeros on the main diagonal.
+    """
+    # Extract number of agents
+    m = positions.shape[0]
+
+    # Compute pairwise distances
+    diff = positions[:, :, np.newaxis] - positions[:, np.newaxis, :]
+    distances = np.linalg.norm(diff, axis=0)  # (m, m)
+
+    # Compute weights
+    weights: np.ndarray[float] = np.zeros((m, m), dtype=float)
+    weights[distances != 0] = 1 / distances[distances != 0]
+    if d_threshold is not None:
+        weights[distances > d_threshold] = 0.0
+
+    # Return weights
+    return weights
