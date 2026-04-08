@@ -279,7 +279,7 @@ def compute_winding_weights(
 
     # Compute weights
     weights: np.ndarray[float] = np.zeros((m, m), dtype=float)
-    weights[distances != 0] = 1 / distances[distances != 0]
+    weights[distances != 0] = 1 / (distances[distances != 0] ** 2)
     if d_threshold is not None:
         weights[distances > d_threshold] = 0.0
 
