@@ -226,16 +226,22 @@ def paths2windings(
     delta_theta: np.ndarray = np.zeros((m, m), dtype=float)  # matrix of angle diff
 
     # Iterate over time steps to compute winding numbers
-    for t in range(1, n):
+    for t in range(0, n):
 
-        # Compute the angles variation with respect to the previous time step
+        # Compute the current angles between the robots
         dx = paths[t, 0, :][np.newaxis, :] - paths[t, 0, :][:, np.newaxis]  # N×N
         dy = paths[t, 1, :][np.newaxis, :] - paths[t, 1, :][:, np.newaxis]  # N×N
-        theta = np.arctan2(dy, dx)
-        delta_theta = 1 / (2 * np.pi) * angle_diff(theta, theta_prev)
+        theta = np.arctan2(dy, dx)  # N×N matrix of angles between robots at time k
+        theta = np.nan_to_num(theta)  # replace NaNs with 0 (when dx=dy=0)
+        theta = (theta + theta.T) / 2  # symmetrize (since theta_ij = -theta_ji)
 
-        # Compute and store winding numbers for current time step
-        windings[t, :, :] = windings[t - 1, :, :] + delta_theta
+        # Skip computation of winding numbers for t=0 as previous theta is undefined
+        if t > 0:
+            # Compute the angles variation with respect to the previous time step
+            delta_theta = 1 / (2 * np.pi) * angle_diff(theta, theta_prev)
+
+            # Compute and store winding numbers for current time step
+            windings[t, :, :] = windings[t - 1, :, :] + delta_theta
 
         # Update previous angles
         theta_prev = theta
