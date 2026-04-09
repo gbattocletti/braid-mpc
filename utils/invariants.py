@@ -273,9 +273,12 @@ def compute_winding_weights(
     # Extract number of agents
     m = positions.shape[0]
 
+    # Remove heading from positions
+    positions = positions[:, :2]  # (m, 2)
+
     # Compute pairwise distances
-    diff = positions[:, :, np.newaxis] - positions[:, np.newaxis, :]
-    distances = np.linalg.norm(diff, axis=0)  # (m, m)
+    diff = positions[:, np.newaxis, :] - positions[np.newaxis, :, :]
+    distances = np.linalg.norm(diff, axis=-1)  # (m, m)
 
     # Compute weights
     weights: np.ndarray[float] = np.zeros((m, m), dtype=float)
