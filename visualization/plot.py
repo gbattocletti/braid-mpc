@@ -114,6 +114,11 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     time = np.arange(n)  # Create time array for z-axis
     colors = plt.color_sequences["tab10"][:m]  # Define colormaps
 
+    # Normalize space to mxm square for consistent visualization
+    paths_max = np.max(np.max(paths, axis=0), axis=1)
+    paths[:, 0, :] = paths[:, 0, :] / paths_max[0] * m
+    paths[:, 1, :] = paths[:, 1, :] / paths_max[1] * m
+
     # Create the plot
     fig: plt.Figure = plt.figure(figsize=figsize / 2.54)
     ax: Axes3D = fig.add_subplot(projection="3d")
