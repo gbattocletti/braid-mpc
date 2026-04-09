@@ -5,7 +5,6 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 import rps.robotarium as rb
-import rps.utilities.transformations
 
 from core import agent, mpc_centralized, mpc_distributed
 from data import grids_1, grids_2
@@ -14,9 +13,9 @@ from visualization import plot
 
 ## Settings ############################################################################
 DATA = grids_2  # initial and goal locations, topological specification
-CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
+CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
-SHOW_PLOTS = False
+SHOW_PLOTS = True
 DEBUG = True
 
 ## Preprocessing #######################################################################
@@ -82,7 +81,7 @@ mpc.u_min = np.array([-0.625, -1.25])
 mpc.u_max = np.array([0.625, 1.25])
 mpc.x_min = np.array([0, 0])
 mpc.x_max = np.array([10, 10])
-mpc.d_min = None  # slightly larger than needed
+mpc.d_min = 0.1
 mpc.initialize_ocp()
 
 # Initialize helper variables (only for distributed MPC)
@@ -154,9 +153,15 @@ if USE_ROBOTARIUM is True:
         )  # plot goal position
 
 ## Main simulation loop ################################################################
-T = 20  # total simulation time (s)
-time = np.arange(0, T + dt, dt)
-for t in time:
+
+# Initialize time vector
+T: float = 10  # total simulation time (s)
+time: np.ndarray = np.arange(0, T + dt, dt)
+
+# Initialize matrix to store traveled trajectories
+traj: np.ndarray = np.zeros((len(time), mpc.n_x, m))
+
+for step, t in enumerate(time):
 
     # 1. Compute current and target winding numbers
     # NOTE: currently the time progresses constantly along the braid
@@ -164,9 +169,6 @@ for t in time:
     w_curr = windings[int(tau * (n_windings - 1)), :, :]
     tau_target = min((t + K * dt) / T, 1)  # cap target time at the end of the braid
     w_target = windings[int(tau_target * (n_windings - 1)), :, :]
-
-    # Compute winding number weights depending on distance between agents
-    alpha_w = invariants.compute_winding_weights(np.array([M[i].x for i in range(m)]))
 
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
@@ -218,9 +220,6 @@ for t in time:
             M[i].cost = cost  # same cost for all agents in centralized MPC
             M[i].t_sol = t_sol  # same solution time for all agents in centralized MPC
 
-    else:
-        raise ValueError(f"Invalid architecture: {mpc.architecture}")
-
     # 3. Take one step in the environment and get new state
     if USE_ROBOTARIUM is True:
 
@@ -254,7 +253,11 @@ for t in time:
         for i in range(m):
             M[i].step(M[i].u_opt[0])
 
-    # 4. Print debug info
+    # 4. Save traveled trajectory
+    for i in range(m):
+        traj[step, :, i] = M[i].x
+
+    # 5. Print debug info
     if DEBUG is True:
         print(f"t: {t:5.2f}s")
         for i in range(m):
@@ -273,7 +276,7 @@ if USE_ROBOTARIUM is True:
     r.call_at_scripts_end()
 
 ## Evaluate results and show plots #####################################################
-# TODO
+plot.plot_paths_3d(traj[:, :2, :], show=False)
 
 # Show all plots
 if SHOW_PLOTS is True:
