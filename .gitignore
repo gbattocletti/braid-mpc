@@ -11,3 +11,6 @@ wheels/
 
 # Dev files
 .dev
+
+# Vscode folder
+.vscode
