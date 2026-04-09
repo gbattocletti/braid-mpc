@@ -192,8 +192,6 @@ class DistributedMPC(MPC):
                 "sol_prev must be of type casadi.OptiSol or None, but got "
                 f"{type(sol_prev)}."
             )
-        if sol_prev is not None and sol_prev is None:
-            raise ValueError("use_warm_start is True but sol_prev was not provided.")
 
         # Parse kwargs
         x_pred: list[np.ndarray] | np.ndarray = kwargs.get("x_pred", None)
@@ -233,17 +231,18 @@ class DistributedMPC(MPC):
             self.ocp.set_value(self.x_pred[j], x_pred[:, :, j])
 
         # Warm start
+        # NOTE: in distributed mpc the initial guess must be passed manually, as the
+        # solution stored in self.sol corresponds to a different agent and cannot be
+        # used. If sol_prev is not provided, the mpc defaults to warm starting with the
+        # initial position.
         if use_warm_start is True and sol_prev is not None:
             self.ocp.set_initial(sol_prev.value_variables())
-        elif self.sol is None:
-            # warm start on 1st solution to avoid numerical errors
+        else:
+            # always warm start with x_0 to avoid numerical errors
             # See: https://github.com/casadi/casadi/discussions/3539
             # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-"NaN-detected"in-my-optimization%3F  # pylint: disable=line-too-long
             for k in range(self.K + 1):
                 self.ocp.set_initial(self.x[k, :], x_0)
-        else:
-            # No warm start
-            # CHECKME: check if this case leads to issues
             pass
 
         # Solve OCP and return solution object

@@ -23,10 +23,10 @@ class CentralizedMPC(MPC):
     def __init__(self, dynamics: str = "single_integrator") -> None:
         super().__init__(dynamics=dynamics)
         self.architecture = "centralized"
-        self.solver_options["print_level"] = 5
-        self.solver_options["max_iter"] = 100_000
-        self.solver_options["max_wall_time"] = 600.0  # [s]
-        self.solver_options["max_cpu_time"] = 600.0  # [s]
+        self.solver_options["print_level"] = 0
+        self.solver_options["max_iter"] = 10_000
+        self.solver_options["max_wall_time"] = 60.0  # [s]
+        self.solver_options["max_cpu_time"] = 60.0  # [s]
 
     def _initialize_ocp(self) -> None:
         """
@@ -211,8 +211,6 @@ class CentralizedMPC(MPC):
                 "sol_prev must be of type casadi.OptiSol or None, but got "
                 f"{type(sol_prev)}."
             )
-        if sol_prev is not None and sol_prev is None:
-            raise ValueError("use_warm_start is True but sol_prev was not provided.")
 
         # Parse kwargs
         x_pred = kwargs.get("x_pred", None)
@@ -231,17 +229,15 @@ class CentralizedMPC(MPC):
         # Warm start
         if use_warm_start is True and sol_prev is not None:
             self.ocp.set_initial(sol_prev.value_variables())
-        elif self.sol is None:
-            # warm start on 1st solution to avoid numerical errors
+        if use_warm_start is True and sol_prev is None and self.sol is not None:
+            self.ocp.set_initial(self.sol.value_variables())
+        else:
+            # always warm start with x_0 to avoid numerical errors
             # See: https://github.com/casadi/casadi/discussions/3539
             # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-"NaN-detected"in-my-optimization%3F  # pylint: disable=line-too-long
             for i in range(self.m):
                 for k in range(self.K + 1):
                     self.ocp.set_initial(self.x[i][k, :], x_0[:, i])
-        else:
-            # No warm start
-            # CHECKME: check if this case leads to issues
-            pass
 
         # Solve OCP and return solution object
         sol = self.ocp.solve()
