@@ -10,8 +10,9 @@ class DistributedMPC(MPC):
     def __init__(self, dynamics: str = "single_integrator") -> None:
         super().__init__(dynamics=dynamics)
         self.architecture = "distributed"
-        self.solver_options["max_wall_time"] = 60.0  # [s]
-        self.solver_options["max_cpu_time"] = 60.0  # [s]
+        self.solver_options["print_level"] = 0
+        self.solver_options["max_wall_time"] = 10.0  # [s]
+        self.solver_options["max_cpu_time"] = 10.0  # [s]
 
         # Optimization problem parameters
         # In the distributed MPC case, each agent's local OCP problem includes the
@@ -135,7 +136,7 @@ class DistributedMPC(MPC):
 
                 # Compute winding number w.r.t. j at the end of prediction horizon
                 w = self.w_curr[j]
-                for k in range(1, self.K + 1):
+                for k in range(1, self.K):
                     theta: ca.SX | ca.MX = ca.atan2(
                         self.x[k, 1] - self.x_pred[j][k, 1],
                         self.x[k, 0] - self.x_pred[j][k, 0],

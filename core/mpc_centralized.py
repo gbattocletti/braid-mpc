@@ -23,6 +23,8 @@ class CentralizedMPC(MPC):
     def __init__(self, dynamics: str = "single_integrator") -> None:
         super().__init__(dynamics=dynamics)
         self.architecture = "centralized"
+        self.solver_options["print_level"] = 5
+        self.solver_options["max_iter"] = 100_000
         self.solver_options["max_wall_time"] = 600.0  # [s]
         self.solver_options["max_cpu_time"] = 600.0  # [s]
 
@@ -161,7 +163,7 @@ class CentralizedMPC(MPC):
                         w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
                     # Add winding cost to the total cost function
-                    self.cost_function += alpha_w_ij * (self.w_target[i][j] - w) ** 2
+                    self.cost_function += alpha_w_ij * (self.w_target[i, j] - w) ** 2
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
