@@ -13,7 +13,7 @@ from visualization import plot
 
 ## Settings ############################################################################
 DATA = grids_2  # initial and goal locations, topological specification
-CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
+CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
@@ -40,15 +40,15 @@ plot.plot_paths_3d(paths, show=False)
 # Compute winding numbers
 windings = invariants.paths2windings(
     paths,
-    upscale_factor=10,
-    intermediate_shape="spline",
+    upscale_factor=100,
+    intermediate_shape="linear",
 )
 n_windings = windings.shape[0]  # length of the winding number vector
 plot.plot_windings(windings, show=False)
 
 ## Controllers and agents setup ########################################################
 # Initialize controller's properties
-dt = 0.5  # s
+dt = 0.1  # s
 K = 20  # time steps
 
 # Create agents
@@ -69,9 +69,9 @@ else:
 mpc.dt = dt
 mpc.K = K
 mpc.m = m
-mpc.alpha_u = 0.001
-mpc.alpha_g = 1.0
-mpc.alpha_w = 0
+mpc.alpha_u = 0.000001
+mpc.alpha_g = 0.000001
+mpc.alpha_w = 1000
 mpc.R = np.diag([1, 1])
 # NOTE: when using the robotarium, the velocity limits (u limits) must currently be
 # scaled manually to match the robotarium's velocity limits, depending on the scaling
@@ -81,7 +81,7 @@ mpc.u_min = np.array([-0.625, -1.25])
 mpc.u_max = np.array([0.625, 1.25])
 mpc.x_min = np.array([0, 0])
 mpc.x_max = np.array([10, 10])
-mpc.d_min = 0.1
+mpc.d_min = 0.05
 mpc.initialize_ocp()
 
 # Initialize helper variables (only for distributed MPC)
