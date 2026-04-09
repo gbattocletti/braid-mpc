@@ -233,12 +233,13 @@ def paths2windings(
         dy = paths[t, 1, :][np.newaxis, :] - paths[t, 1, :][:, np.newaxis]  # N×N
         theta = np.arctan2(dy, dx)  # N×N matrix of angles between robots at time k
         theta = np.nan_to_num(theta)  # replace NaNs with 0 (when dx=dy=0)
-        theta = (theta + theta.T) / 2  # symmetrize (since theta_ij = -theta_ji)
 
         # Skip computation of winding numbers for t=0 as previous theta is undefined
         if t > 0:
             # Compute the angles variation with respect to the previous time step
             delta_theta = 1 / (2 * np.pi) * angle_diff(theta, theta_prev)
+            upper = np.triu(delta_theta, 1)
+            delta_theta = upper - upper.T  # force skew-symmetry
 
             # Compute and store winding numbers for current time step
             windings[t, :, :] = windings[t - 1, :, :] + delta_theta
