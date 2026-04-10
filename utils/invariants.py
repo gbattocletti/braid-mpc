@@ -238,10 +238,6 @@ def paths2windings(
         if t > 0:
             # Compute the angles variation with respect to the previous time step
             delta_theta = 1 / (2 * np.pi) * angle_diff(theta, theta_prev)
-            upper = np.triu(delta_theta, 1)
-            delta_theta = upper - upper.T  # force skew-symmetry
-
-            # Compute and store winding numbers for current time step
             windings[t, :, :] = windings[t - 1, :, :] + delta_theta
 
         # Update previous angles
