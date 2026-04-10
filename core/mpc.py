@@ -270,7 +270,7 @@ class MPC(ABC):
                 "initialize_ocp() method before calling solve()."
             )
 
-        # Call the solve method implemented in the subclass
+        # Solve the OCP by calling the _solve method implemented in the subclass
         self.sol = self._solve(
             x_0,
             x_goal,
@@ -280,11 +280,6 @@ class MPC(ABC):
             sol_prev,
             **kwargs,
         )
-
-        # Solve OCP
-        self.sol = self.ocp.solve()
-        if self.sol.stats()["success"] is not True:
-            raise RuntimeError("MPC optimization failed: " + self.sol.stats()["status"])
 
         # Extract the OCP solution
         if self.architecture == "distributed":
