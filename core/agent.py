@@ -27,8 +27,11 @@ class Agent:
 
         # MPC solution object (for warm starting the optimization problem)
         self.sol: ca.OptiSol | None = None  # solution of the OCP
-        self.cost: float | None = None  # cost of the MPC solution
         self.t_sol: float | None = None  # time taken to solve the MPC problem
+        self.cost: float | None = None  # cost of the MPC solution
+        self.cost_u: float | None = None  # control cost of the MPC solution
+        self.cost_g: float | None = None  # goal cost of the MPC solution
+        self.cost_w: float | None = None  # winding cost of the MPC solution
 
     def step(self, u: np.ndarray) -> None:
         """

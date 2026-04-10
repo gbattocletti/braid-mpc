@@ -319,7 +319,7 @@ class MPC(ABC):
         )
 
     @abstractmethod
-    def _check_cost(self) -> float:
+    def check_cost(self) -> float:
         """
         Compute the cost function value for the current solution. This is a helper
         method intended for debugging and testing.
@@ -334,5 +334,5 @@ class MPC(ABC):
             RuntimeError: if the OCP has not been solved yet.
         """
         raise NotImplementedError(
-            "The _check_cost() method must be implemented in a subclass of MPC."
+            "The check_cost() method must be implemented in a subclass of MPC."
         )

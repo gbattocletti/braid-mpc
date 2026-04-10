@@ -208,6 +208,13 @@ for step, t in enumerate(time):
             M[i].cost = cost
             M[i].t_sol = t_sol
 
+            # Compute individual components of the cost function
+            if DEBUG is True:
+                _, cost_u, cost_g, cost_w = mpc.check_cost()
+                M[i].cost_u = cost_u
+                M[i].cost_g = cost_g
+                M[i].cost_w = cost_w
+
     # Centralized MPC controller
     elif mpc.architecture == "centralized":
         # Collect initial states of all agents
@@ -279,8 +286,15 @@ for step, t in enumerate(time):
                 f"x(k+1): [{M[i].x[0]:5.2f},{M[i].x[1]:5.2f},{M[i].x[2]:5.2f}], "
                 f"u*(0|k): [{M[i].u_opt[0, 0]: 4.2f},{M[i].u_opt[0, 1]: 4.2f}], "
                 f"t_sol: {M[i].t_sol:.2f}s, "
-                f"cost: {M[i].cost:.2f}"
+                f"cost: {M[i].cost:.2f}",
+                end="",
             )
+            if mpc.architecture == "distributed":
+                print(
+                    f" ({M[i].cost_u:.2f}, {M[i].cost_g:.2f}, {M[i].cost_w:.2f})"
+                )  # print individual components of the cost function
+            else:
+                print("")
 
 # Call robotarium termination function
 if USE_ROBOTARIUM is True:

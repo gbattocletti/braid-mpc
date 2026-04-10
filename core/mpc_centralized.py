@@ -251,7 +251,7 @@ class CentralizedMPC(MPC):
         # Return the solution object
         return sol
 
-    def _check_cost(self) -> tuple[float, float, float, float]:
+    def check_cost(self) -> tuple[float, float, float, float]:
         """
         Compute the cost function value for the current solution. This method is mainly
         intended for debugging and analysis purposes, as the cost value is already

@@ -249,7 +249,7 @@ class DistributedMPC(MPC):
         sol = self.ocp.solve()
         return sol
 
-    def _check_cost(self) -> tuple[float, float, float, float]:
+    def check_cost(self) -> tuple[float, float, float, float]:
         """
         Compute the cost function value for the current solution. This method is mainly
         intended for debugging and analysis purposes, as the cost value is already
@@ -275,7 +275,7 @@ class DistributedMPC(MPC):
         if self.sol is None:
             raise RuntimeError(
                 "No solution available. Please solve the OCP before calling "
-                "_check_cost()."
+                "check_cost()."
             )
 
         # Extract the OCP parameters and solution values
@@ -318,8 +318,8 @@ class DistributedMPC(MPC):
                     alpha_w_j = self.alpha_w
 
                 # Compute winding number w.r.t. j at the end of prediction horizon
-                w: float = w_curr[j]
-                for k in range(1, self.K + 1):
+                w: float = w_curr[j] if isinstance(w_curr, np.ndarray) else w_curr
+                for k in range(1, self.K):
                     theta: float = np.atan2(
                         x[k, 1] - x_pred[j][k, 1],
                         x[k, 0] - x_pred[j][k, 0],
@@ -331,7 +331,10 @@ class DistributedMPC(MPC):
                     w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
 
                 # Cumulate winding costs
-                winding_cost += alpha_w_j * (w_target[j] - w) ** 2
+                w_target_j = (
+                    w_target[j] if isinstance(w_target, np.ndarray) else w_target
+                )
+                winding_cost += alpha_w_j * (w_target_j - w) ** 2
 
         # Total cost
         cost = goal_cost + control_cost + winding_cost
