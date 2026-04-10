@@ -243,8 +243,11 @@ class CentralizedMPC(MPC):
         try:
             sol = self.ocp.solve()
         except RuntimeError as e:
-            if e in ["Maximum_CpuTime_Exceeded", "Maximum_Iterations_Exceeded"]:
-                sol = self.ocp.debug
+            if self.ocp.debug.stats()["return_status"] in [
+                "Maximum_CpuTime_Exceeded",
+                "Maximum_Iterations_Exceeded",
+            ]:
+                sol = self.ocp.debug  # try using the best solution found so far
             else:
                 raise e
 
