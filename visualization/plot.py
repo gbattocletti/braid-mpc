@@ -202,7 +202,11 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
     for i in range(n_plots):
         row = i // plot_cols
         col = i % plot_cols
-        ax: plt.Axes = axes[row, col]
+        ax: plt.Axes
+        if len(axes.shape) == 1:
+            ax = axes[i]
+        else:
+            ax = axes[row, col]
         if i >= m:
             ax.axis("off")  # Hide unused subplots
             continue
@@ -227,7 +231,7 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
             True, which="minor", linestyle=":", color="gray", linewidth=0.3, zorder=1
         )
         ax.minorticks_on()
-        ax.set_title(f"Agent {i+1}")
+        ax.set_title(f"Agent {i+1}", color=colors[i], fontsize=10)
         ax.set_xlabel("t")
         ax.set_ylabel("$w_{ij}$")
         ax.grid(True)
