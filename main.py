@@ -10,7 +10,9 @@ from utils import invariants, io, robotarium_bridge
 from visualization import plot
 
 ## Settings ############################################################################
-DATA = "data/grids_m5_2.yaml"  # initial and goal locations, topological specification
+
+# User-defined settings
+DATA = "data/grids_m2_1.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
@@ -38,7 +40,7 @@ x_goal = np.vstack([x_goal, np.zeros([1, m])]) if x_goal.shape[0] == 2 else x_go
 
 # Convert grids to paths
 paths = invariants.grids2paths(grids)
-plot.plot_paths_3d(paths, show=False)
+plot.plot_paths_3d(paths, normalize=True, show=False)
 
 # Compute winding numbers
 windings = invariants.paths2windings(
@@ -54,8 +56,8 @@ np.random.seed(1312)
 
 ## Controllers and agents setup ########################################################
 # Initialize controller's properties
-dt = 0.2  # s
-K = 20  # time steps
+dt = 0.1  # s
+K = 10  # time steps
 
 # Create agents
 M = [agent.Agent(i) for i in range(m)]
@@ -75,19 +77,25 @@ else:
 mpc.dt = dt
 mpc.K = K
 mpc.m = m
-mpc.alpha_u = 0.001
-mpc.alpha_g = 1
-mpc.alpha_w = 0
-mpc.R = np.diag([1, 1])
-# NOTE: when using the robotarium, the velocity limits (u limits) must currently be
-# scaled manually to match the robotarium's velocity limits, depending on the scaling
-# factor used between the robotarium environment size and the 'real world' environment
-# size. Otherwise, the robot's velocity will be different than expected.
-mpc.u_min = np.array([-0.625, -1.25])
-mpc.u_max = np.array([0.625, 1.25])
-mpc.x_min = np.array([0, 0])
-mpc.x_max = np.array([10, 10])
-mpc.d_min = 0.05
+mpc.alpha_u = 0.01
+mpc.alpha_g = 0.0
+mpc.alpha_w = 1000
+mpc.d_min = 0.5
+mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
+mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
+if USE_ROBOTARIUM is True:
+    # NOTE: when using the robotarium, the linear velocity limit (1st element of the
+    # u_min and u_max vectors) must be scaled to match the robotarium's velocity limits.
+    # The scaling depends on the scaling factor between the robotarium environment size
+    # and the 'real world' environment size. Otherwise, the robot's velocity will be
+    # different than expected.
+    mpc.u_min = np.array([-0.625, -1.25])  # u is a vector [v, w]
+    mpc.u_max = np.array([0.625, 1.25])
+    mpc.R = np.diag([1, 0.1])  # lower penalty for angular velocity
+else:
+    mpc.u_min = np.array([-1, -1])  # u is a vector [v_x, v_y]
+    mpc.u_max = np.array([1, 1])
+    mpc.R = np.diag([1, 1])
 mpc.initialize_ocp()
 
 # Initialize helper variables (only for distributed MPC)
@@ -161,7 +169,7 @@ if USE_ROBOTARIUM is True:
 ## Main simulation loop ################################################################
 
 # Initialize time vector
-T: float = 10  # total simulation time (s)
+T: float = 5  # total simulation time (s)
 time: np.ndarray = np.arange(0, T + dt, dt)
 
 # Initialize matrix to store traveled trajectories
@@ -174,12 +182,11 @@ for step, t in enumerate(time):
     tau = t / T  # time n
     w_curr = windings[int(tau * (n_windings - 1)), :, :]
     tau_target = min((t + K * dt) / T, 1)  # cap target time at the end of the braid
+    print(tau_target)
     w_target = windings[int(tau_target * (n_windings - 1)), :, :]
 
     # Compute winding number weights depending on distance between agents
     alpha_w = invariants.compute_winding_weights(np.array([M[i].x for i in range(m)]))
-    # TODO: make alpha_w a parameter in the optimization problem (instead of a constant)
-    # and assign the new value at every time step.
 
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
@@ -301,7 +308,13 @@ if USE_ROBOTARIUM is True:
     r.call_at_scripts_end()
 
 ## Evaluate results and show plots #####################################################
-plot.plot_paths_3d(traj[:, :2, :], show=False)
+plot.plot_paths_3d(
+    traj[:, :2, :],
+    x_lims=np.array(data["x_lims"]),
+    y_lims=np.array(data["y_lims"]),
+    normalize=False,
+    show=False,
+)
 
 # Show all plots
 if SHOW_PLOTS is True:
