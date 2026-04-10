@@ -42,14 +42,13 @@ x_goal = np.vstack([x_goal, np.zeros([1, m])]) if x_goal.shape[0] == 2 else x_go
 paths = invariants.grids2paths(grids)
 plot.plot_paths_3d(paths, normalize=True, show=False)
 
-# Compute winding numbers
-windings = invariants.paths2windings(
+# Compute target winding numbers
+windings_target = invariants.paths2windings(
     paths,
     upscale_factor=100,
     intermediate_shape="linear",
 )
-n_windings = windings.shape[0]  # length of the winding number vector
-plot.plot_windings(windings, show=False)
+n_windings = windings_target.shape[0]  # length of the winding number vector
 
 # Set random seed for reproducibility
 np.random.seed(1312)
@@ -77,12 +76,14 @@ else:
 mpc.dt = dt
 mpc.K = K
 mpc.m = m
-mpc.alpha_u = 0.01
+mpc.alpha_u = 0.00
 mpc.alpha_g = 0.0
 mpc.alpha_w = 1000
 mpc.d_min = 0.5
-mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
-mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
+# mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
+# mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
+mpc.x_min = np.array([-1000, -1000])
+mpc.x_max = np.array([1000, 1000])
 if USE_ROBOTARIUM is True:
     # NOTE: when using the robotarium, the linear velocity limit (1st element of the
     # u_min and u_max vectors) must be scaled to match the robotarium's velocity limits.
@@ -169,21 +170,20 @@ if USE_ROBOTARIUM is True:
 ## Main simulation loop ################################################################
 
 # Initialize time vector
-T: float = 5  # total simulation time (s)
+T: float = 10  # total simulation time (s)
 time: np.ndarray = np.arange(0, T + dt, dt)
 
 # Initialize matrix to store traveled trajectories
-traj: np.ndarray = np.zeros((len(time), mpc.n_x, m))
+trajectories: np.ndarray = np.zeros((len(time), mpc.n_x, m))  # realized trajectories
 
 for step, t in enumerate(time):
 
     # 1. Compute current and target winding numbers
-    # NOTE: currently the time progresses constantly along the braid
-    tau = t / T  # time n
-    w_curr = windings[int(tau * (n_windings - 1)), :, :]
+    # NOTE: in the current implementation the time progresses constantly along the braid
+    tau = t / T  # time normalized to [0, 1]
+    w_curr = windings_target[int(tau * (n_windings - 1)), :, :]
     tau_target = min((t + K * dt) / T, 1)  # cap target time at the end of the braid
-    print(tau_target)
-    w_target = windings[int(tau_target * (n_windings - 1)), :, :]
+    w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
 
     # Compute winding number weights depending on distance between agents
     alpha_w = invariants.compute_winding_weights(np.array([M[i].x for i in range(m)]))
@@ -206,7 +206,7 @@ for step, t in enumerate(time):
                 w_curr=np.delete(w_curr[i], i, axis=0),  # remove self winding number
                 w_target=np.delete(w_target[i], i, axis=0),
                 use_warm_start=True,
-                sol=M[i].sol,
+                sol_prev=M[i].sol,
                 x_pred=np.delete(x_pred, i, axis=2),  # remove self predicted trajectory
             )
             M[i].sol = mpc.sol  # save solution in agent object
@@ -235,7 +235,6 @@ for step, t in enumerate(time):
             w_curr=w_curr,
             w_target=w_target,
             use_warm_start=True,
-            sol_prev=mpc.sol,
         )
 
         # Save solution in agent objects
@@ -280,7 +279,7 @@ for step, t in enumerate(time):
 
     # 4. Save traveled trajectory
     for i in range(m):
-        traj[step, :, i] = M[i].x
+        trajectories[step, :, i] = M[i].x
 
     # 5. Print debug info
     if DEBUG is True:
@@ -308,13 +307,19 @@ if USE_ROBOTARIUM is True:
     r.call_at_scripts_end()
 
 ## Evaluate results and show plots #####################################################
+
+# Plot realized trajectories in space-time domain
 plot.plot_paths_3d(
-    traj[:, :2, :],
+    trajectories[:, :2, :],
     x_lims=np.array(data["x_lims"]),
     y_lims=np.array(data["y_lims"]),
     normalize=False,
     show=False,
 )
+
+# Plot realized winding numbers vs the target ones
+windings: np.ndarray = invariants.paths2windings(trajectories[:, :2, :])
+plot.plot_windings(windings, windings_ref=windings_target, show=False)
 
 # Show all plots
 if SHOW_PLOTS is True:

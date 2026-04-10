@@ -161,6 +161,10 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
         windings (np.ndarray): A 3D array of shape (n, m, m) representing n time steps
             of m agents' winding numbers. Each entry windings[t, i, j] gives the winding
             number of agent i with respect to agent j at time step t.
+        windings_ref (np.ndarray, optional): A 3D array of shape (n, m, m) representing
+            the reference winding numbers to compare against. If provided, these will be
+            plotted as dashed lines with the same color as the corresponding winding
+            numbers. Default is None.
         figsize (tuple[float, float], optional): The size of the figure in cm.
         show_legends (bool, optional): Whether to show legends for the plot. Default is
             False.
@@ -174,9 +178,10 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
         ValueError: If the input 'windings' does not have the correct shape.
     """
     # Parse kwargs
-    figsize = kwargs.get("figsize", np.array([10, 10]))
-    show_legends = kwargs.get("show_legends", False)
-    show = kwargs.get("show", False)
+    figsize: np.ndarray = kwargs.get("figsize", np.array([10, 10]))
+    windings_ref: np.ndarray = kwargs.get("windings_ref", None)
+    show_legends: bool = kwargs.get("show_legends", False)
+    show: bool = kwargs.get("show", False)
 
     # Validate inputs
     if not isinstance(windings, np.ndarray):
@@ -191,8 +196,12 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
     # Extract dimensions
     n, m, _ = windings.shape
 
-    # Create plot variables
-    time = np.arange(n)  # Create time array for z-axis
+    # Create time vectors
+    time = np.linspace(0, 1, n)
+    if windings_ref is not None:
+        time_ref = np.linspace(0, 1, windings_ref.shape[0])
+
+    # Define colormaps
     colors = plt.color_sequences["tab10"][:m]  # Define colormaps
 
     # Create the plot
@@ -227,7 +236,18 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
                 linewidth=1.5,
                 color=colors[j],
                 label=f"w_{{{i}{j}}}",
+                zorder=2,
             )
+            if windings_ref is not None:  # Plot reference windings if provided
+                ax.plot(
+                    time_ref,
+                    windings_ref[:, i, j],
+                    linewidth=1.5,
+                    color=colors[j],
+                    linestyle="--",
+                    label=f"w_{{{i}{j}}} ref",
+                    zorder=1,
+                )
 
         # Set labels and title
         ax.set_xlim(0, n - 1)
