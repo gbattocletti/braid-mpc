@@ -240,7 +240,15 @@ class CentralizedMPC(MPC):
                     self.ocp.set_initial(self.x[i][k, :], x_0[:, i])
 
         # Solve OCP and return solution object
-        sol = self.ocp.solve()
+        try:
+            sol = self.ocp.solve()
+        except RuntimeError as e:
+            if e in ["Maximum_CpuTime_Exceeded", "Maximum_Iterations_Exceeded"]:
+                sol = self.ocp.debug
+            else:
+                raise e
+
+        # Return the solution object
         return sol
 
     def _check_cost(self) -> tuple[float, float, float, float]:
