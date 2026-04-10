@@ -1,5 +1,4 @@
-# pylint: disable=unused-import
-from typing import Callable
+import os
 
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
@@ -7,25 +6,29 @@ import numpy as np
 import rps.robotarium as rb
 
 from core import agent, mpc_centralized, mpc_distributed
-from data import grids_1, grids_2
-from utils import invariants, robotarium_bridge
+from utils import invariants, io, robotarium_bridge
 from visualization import plot
 
 ## Settings ############################################################################
-DATA = grids_2  # initial and goal locations, topological specification
+DATA = "data/grids_m5_2.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
 
 ## Preprocessing #######################################################################
-np.random.seed(1312)
+
+# Move to script directory
+abspath = os.path.abspath(__file__)
+dir_name = os.path.dirname(abspath)
+os.chdir(dir_name)
 
 # Load input data
-m = DATA.m
-grids = DATA.grids  # topological specification
-x_init = DATA.x_init.T
-x_goal = DATA.x_goal.T
+data = io.load_yaml(DATA)
+m = data["m"]
+grids = np.array(data["grids"])  # topological specification
+x_init = np.array(data["x_init"]).T
+x_goal = np.array(data["x_goal"]).T
 
 # Add orientation dimension to states if not included
 # NOTE: heading in x_init is used only for unicycle dynamic model, while goal heading
@@ -46,9 +49,12 @@ windings = invariants.paths2windings(
 n_windings = windings.shape[0]  # length of the winding number vector
 plot.plot_windings(windings, show=False)
 
+# Set random seed for reproducibility
+np.random.seed(1312)
+
 ## Controllers and agents setup ########################################################
 # Initialize controller's properties
-dt = 0.1  # s
+dt = 0.2  # s
 K = 20  # time steps
 
 # Create agents
@@ -69,9 +75,9 @@ else:
 mpc.dt = dt
 mpc.K = K
 mpc.m = m
-mpc.alpha_u = 0.000001
-mpc.alpha_g = 0.000001
-mpc.alpha_w = 1000
+mpc.alpha_u = 0.001
+mpc.alpha_g = 1
+mpc.alpha_w = 0
 mpc.R = np.diag([1, 1])
 # NOTE: when using the robotarium, the velocity limits (u limits) must currently be
 # scaled manually to match the robotarium's velocity limits, depending on the scaling
@@ -169,6 +175,11 @@ for step, t in enumerate(time):
     w_curr = windings[int(tau * (n_windings - 1)), :, :]
     tau_target = min((t + K * dt) / T, 1)  # cap target time at the end of the braid
     w_target = windings[int(tau_target * (n_windings - 1)), :, :]
+
+    # Compute winding number weights depending on distance between agents
+    alpha_w = invariants.compute_winding_weights(np.array([M[i].x for i in range(m)]))
+    # TODO: make alpha_w a parameter in the optimization problem (instead of a constant)
+    # and assign the new value at every time step.
 
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
