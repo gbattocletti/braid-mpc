@@ -39,16 +39,15 @@ def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         figsize = np.array(figsize)
 
     # Extract dimensions
-    n, _, m = paths.shape
+    _, _, m = paths.shape
 
     # Create the plot
     colors = plt.color_sequences["tab10"][:m]
     fig, ax = plt.subplots(figsize=figsize / 2.54)
-    for t in range(n):
-        for i in range(m):
-            x = paths[t, 0, i]
-            y = paths[t, 1, i]
-            ax.plot(x, y, linewidth=1.3, color=colors[i], label=f"Agent {i+1}")
+    for i in range(m):
+        x = paths[:, 0, i]
+        y = paths[:, 1, i]
+        ax.plot(x, y, linewidth=1.3, color=colors[i], label=f"Agent {i+1}")
 
     ax.set_aspect("equal", "box")
     ax.set_xlim([-1, m])
@@ -76,6 +75,11 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         paths (np.ndarray): A 3D array of shape (n, 2, m) representing n time steps of
             m agents' positions in 2D space. Each entry paths[t, :, i] gives the
             (x, y) coordinates of agent i at time step t.
+        normalize (bool, optional): Whether to normalize the paths to fit within a
+            mxm square. This option is recommended when plotting a sequence of
+            permutation grids. Default is False.
+        x_lims (np.ndarray, optional): The limits for the x-axis. Default is (-1, m).
+        y_lims (np.ndarray, optional): The limits for the y-axis. Default is (-1, m).
         figsize (tuple[float, float], optional): The size of the figure in cm.
             Default is (10, 10).
         pov (list[float], optional): A list of three floats representing the elevation,
@@ -91,9 +95,12 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         ValueError: If the second dimension of 'paths' is not 2 for (x, y) coordinates.
     """
     # Parse kwargs
-    figsize = kwargs.get("figsize", np.array([10, 10]))
-    pov = kwargs.get("pov", [15, 35, 0])
-    show = kwargs.get("show", False)
+    normalize: bool = kwargs.get("normalize", False)
+    x_lims: np.ndarray = kwargs.get("x_lims", (-1, paths.shape[2]))
+    y_lims: np.ndarray = kwargs.get("y_lims", (-1, paths.shape[2]))
+    figsize: np.ndarray = kwargs.get("figsize", np.array([10, 10]))
+    pov: list[float] = kwargs.get("pov", [15, 35, 0])
+    show: bool = kwargs.get("show", False)
 
     # Validate inputs
     if not isinstance(paths, np.ndarray):
@@ -115,9 +122,10 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     colors = plt.color_sequences["tab10"][:m]  # Define colormaps
 
     # Normalize space to mxm square for consistent visualization
-    paths_max = np.max(np.max(paths, axis=0), axis=1)
-    paths[:, 0, :] = paths[:, 0, :] / paths_max[0] * m
-    paths[:, 1, :] = paths[:, 1, :] / paths_max[1] * m
+    if normalize:
+        paths_max = np.max(np.max(paths, axis=0), axis=1)
+        paths[:, 0, :] = paths[:, 0, :] / paths_max[0] * m
+        paths[:, 1, :] = paths[:, 1, :] / paths_max[1] * m
 
     # Create the plot
     fig: plt.Figure = plt.figure(figsize=figsize / 2.54)
@@ -128,8 +136,8 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         ax.plot(x, y, time, linewidth=1.3, color=colors[i], label=f"Agent {i+1}")
 
     # Set limits and aspect
-    ax.set_xlim(-1, m)
-    ax.set_ylim(-1, m)
+    ax.set_xlim(x_lims)
+    ax.set_ylim(y_lims)
     ax.set_zlim(0, n - 1)
     ax.set_box_aspect([1, 1, 1.7])  # ax.set_aspect("equalxy")
     ax.view_init(elev=pov[0], azim=pov[1], roll=pov[2])
