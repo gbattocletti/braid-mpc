@@ -250,7 +250,7 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
                 )
 
         # Set labels and title
-        ax.set_xlim(0, n - 1)
+        ax.set_xlim(0, 1)
         ax.set_ylim(windings.min() - 1, windings.max() + 1)
         ax.grid(
             True, which="major", linestyle=":", color="gray", linewidth=0.5, zorder=1
