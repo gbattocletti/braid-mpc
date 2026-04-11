@@ -150,17 +150,25 @@ class CentralizedMPC(MPC):
                         alpha_w_ij = self.alpha_w
 
                     # Compute winding number w.r.t. j at the end of prediction horizon
-                    w = self.w_curr[j]
+                    w = self.w_curr[i, j]
                     for k in range(1, self.K + 1):
-                        theta: ca.SX | ca.MX = ca.atan2(
-                            self.x[i][k, 1] - self.x[j][k, 1],
-                            self.x[i][k, 0] - self.x[j][k, 0],
+                        # theta: ca.SX | ca.MX = ca.atan2(
+                        #     self.x[i][k, 1] - self.x[j][k, 1],
+                        #     self.x[i][k, 0] - self.x[j][k, 0],
+                        # )
+                        # theta_prev: ca.SX | ca.MX = ca.atan2(
+                        #     self.x[i][k - 1, 1] - self.x[j][k - 1, 1],
+                        #     self.x[i][k - 1, 0] - self.x[j][k - 1, 0],
+                        # )
+                        # w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
+                        dx = self.x[i][k, 0] - self.x[j][k, 0]
+                        dy = self.x[i][k, 1] - self.x[j][k, 1]
+                        dx_prev = self.x[i][k - 1, 0] - self.x[j][k - 1, 0]
+                        dy_prev = self.x[i][k - 1, 1] - self.x[j][k - 1, 1]
+                        delta_theta = ca.atan2(
+                            dy * dx_prev - dx * dy_prev, dx * dx_prev + dy * dy_prev
                         )
-                        theta_prev: ca.SX | ca.MX = ca.atan2(
-                            self.x[j][k - 1, 1] - self.x[i][k - 1, 1],
-                            self.x[j][k - 1, 0] - self.x[i][k - 1, 0],
-                        )
-                        w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
+                        w += 1 / (2 * np.pi) * delta_theta
 
                     # Add winding cost to the total cost function
                     self.cost_function += alpha_w_ij * (self.w_target[i, j] - w) ** 2
