@@ -12,7 +12,7 @@ from visualization import plot
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m2_1.yaml"  # initial and goal locations, topological specification
+DATA = "data/grids_m2_2.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
@@ -45,9 +45,9 @@ plot.plot_paths_3d(paths, normalize=True, show=False)
 # Compute target winding numbers
 windings_target = invariants.paths2windings(
     paths,
-    upscale_factor=100,
+    upscale_factor=10,
     intermediate_shape="linear",
-)
+)  # (n_windings, m, m)
 n_windings = windings_target.shape[0]  # length of the winding number vector
 
 # Set random seed for reproducibility
@@ -76,10 +76,10 @@ else:
 mpc.dt = dt
 mpc.K = K
 mpc.m = m
-mpc.alpha_u = 0.00
+mpc.alpha_u = 0.01
 mpc.alpha_g = 0.0
-mpc.alpha_w = 1000
-mpc.d_min = 0.5
+mpc.alpha_w = 10
+mpc.d_min = 1
 # mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 # mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
 mpc.x_min = np.array([-1000, -1000])
@@ -170,18 +170,27 @@ if USE_ROBOTARIUM is True:
 ## Main simulation loop ################################################################
 
 # Initialize time vector
-T: float = 10  # total simulation time (s)
+T: float = 15  # total simulation time (s)
 time: np.ndarray = np.arange(0, T + dt, dt)
 
 # Initialize matrix to store traveled trajectories
 trajectories: np.ndarray = np.zeros((len(time), mpc.n_x, m))  # realized trajectories
+theta: np.ndarray = np.zeros((m, m))  # relative headings between the agents
+theta_prev: np.ndarray = invariants.relative_headings(x_init)  # prev relative headings
+w_curr: np.ndarray = np.zeros((m, m))  # current winding numbers between the agents
 
 for step, t in enumerate(time):
 
-    # 1. Compute current and target winding numbers
+    # 1. Compute target winding numbers
     # NOTE: in the current implementation the time progresses constantly along the braid
-    tau = t / T  # time normalized to [0, 1]
-    w_curr = windings_target[int(tau * (n_windings - 1)), :, :]
+    # TODO: tau_target should probably be computed based on the actual progress of the
+    # agents along the braid, rather than just time. This would avoid for the error to
+    # explode if the agents lag behind the prespecified time schedule. The value of
+    # tau (actual progress along the braid) can be estimated based on the current
+    # winding numbers compared with the target ones. Since different pairings i, j will
+    # likely progress at different rates, we can either let every pairing to have its
+    # own tau_target_ij, or compute a single tau_target based on the average progress
+    # across all pairings.
     tau_target = min((t + K * dt) / T, 1)  # cap target time at the end of the braid
     w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
 
@@ -244,6 +253,18 @@ for step, t in enumerate(time):
             M[i].cost = cost  # same cost for all agents in centralized MPC
             M[i].t_sol = t_sol  # same solution time for all agents in centralized MPC
 
+    # Sanity check: verify that the predicted trajectories do not lead to collisions
+    if DEBUG is True:
+        for k in range(K):
+            for i in range(m):
+                for j in range(i + 1, m):
+                    dist_ij = np.linalg.norm(M[i].x_opt[k, :2] - M[j].x_opt[k, :2])
+                    if dist_ij < mpc.d_min:
+                        print(
+                            f"Warning: predicted trajectories of agents {i} and {j} "
+                            f"are too close at time step {k} (distance: {dist_ij:.4f})"
+                        )
+
     # 3. Take one step in the environment and get new state
     if USE_ROBOTARIUM is True:
 
@@ -277,11 +298,25 @@ for step, t in enumerate(time):
         for i in range(m):
             M[i].step(M[i].u_opt[0])
 
-    # 4. Save traveled trajectory
+    # 4. Update current winding numbers
+    x_all = np.array([M[i].x for i in range(m)]).T  # reshape to m x n_x
+    theta = invariants.relative_headings(x_all)
+    w_curr = w_curr + 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
+    theta_prev = theta
+
+    # 5. Save traveled trajectory
+    if DEBUG is True:
+        prediction_error = np.linalg.norm(M[i].x_opt[1, :2] - M[i].x[:2])
+        if prediction_error > 0.001:
+            print(
+                f"Warning: large prediction error for agent {i} at time {t:.2f}s "
+                f"(error: {prediction_error:.2f})"
+            )
+
     for i in range(m):
         trajectories[step, :, i] = M[i].x
 
-    # 5. Print debug info
+    # 6. Print debug info
     if DEBUG is True:
         print(f"t: {t:5.2f}s")
         for i in range(m):
