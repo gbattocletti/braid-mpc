@@ -26,6 +26,31 @@ def angle_diff(
     return np.arctan2(np.sin(alpha - beta), np.cos(alpha - beta))
 
 
+def relative_headings(poses: np.ndarray) -> np.ndarray:
+    """
+    Compute the relative headings between agents based on their positions.
+
+    Args:
+        poses (np.ndarray): A 2D array of shape (3, m) representing the current
+            positions of m agents in 2D space. Each entry poses[:, i] gives the
+            (x, y, theta) coordinates of agent i.
+
+    Returns:
+        np.ndarray: A 2D array of shape (m, m) representing the relative headings
+            between each pair of agents. The entry at [i, j] gives the angle from
+            agent i to agent j in radians. The relative headings matrix is symmetrical
+            with zeros on the main diagonal.
+    """
+    # Remove heading from poses
+    poses = poses[:2, :]  # (2, m)
+
+    # Compute relative headings
+    diff = poses[:, np.newaxis, :] - poses[np.newaxis, :, :]
+    headings = np.arctan2(diff[:, :, 1], diff[:, :, 0])  # (m, m)
+
+    return headings
+
+
 def grids2paths(grids: np.ndarray) -> np.ndarray:
     """
     Convert a list of grids to a list of paths.
