@@ -142,12 +142,12 @@ class CentralizedMPC(MPC):
                         continue  # skip self-winding
 
                     # Get weight for agent i w.r.t. agent j
-                    alpha_w_ij: float
-                    if isinstance(self.alpha_w, np.ndarray):
-                        self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
-                        alpha_w_ij = self.alpha_w[i, j]
-                    else:
-                        alpha_w_ij = self.alpha_w
+                    alpha_w_ij: float = self.alpha_w
+                    # if isinstance(self.alpha_w, np.ndarray):
+                    #     self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
+                    #     alpha_w_ij = self.alpha_w[i, j]
+                    # else:
+                    #     alpha_w_ij = self.alpha_w
 
                     # Compute winding number w.r.t. j at the end of prediction horizon
                     w = self.w_curr[i, j]
@@ -161,12 +161,13 @@ class CentralizedMPC(MPC):
                         #     self.x[i][k - 1, 0] - self.x[j][k - 1, 0],
                         # )
                         # w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
-                        dx = self.x[i][k, 0] - self.x[j][k, 0]
-                        dy = self.x[i][k, 1] - self.x[j][k, 1]
-                        dx_prev = self.x[i][k - 1, 0] - self.x[j][k - 1, 0]
-                        dy_prev = self.x[i][k - 1, 1] - self.x[j][k - 1, 1]
+                        dx = self.x[j][k, 0] - self.x[i][k, 0]
+                        dy = self.x[j][k, 1] - self.x[i][k, 1]
+                        dx_prev = self.x[j][k - 1, 0] - self.x[i][k - 1, 0]
+                        dy_prev = self.x[j][k - 1, 1] - self.x[i][k - 1, 1]
                         delta_theta = ca.atan2(
-                            dy * dx_prev - dx * dy_prev, dx * dx_prev + dy * dy_prev
+                            dy * dx_prev - dx * dy_prev,
+                            dx * dx_prev + dy * dy_prev + 1e-6,  # avoid division by 0
                         )
                         w += 1 / (2 * np.pi) * delta_theta
 
