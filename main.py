@@ -175,6 +175,7 @@ time: np.ndarray = np.arange(0, T + dt, dt)
 
 # Initialize matrix to store traveled trajectories
 trajectories: np.ndarray = np.zeros((len(time), mpc.n_x, m))  # realized trajectories
+cost_mat: np.ndarray = np.zeros((len(time), m))  # cost at each time step for each agent
 theta: np.ndarray = np.zeros((m, m))  # relative headings between the agents
 theta_prev: np.ndarray = invariants.relative_headings(x_init)  # prev relative headings
 w_curr: np.ndarray = np.zeros((m, m))  # current winding numbers between the agents
@@ -315,6 +316,7 @@ for step, t in enumerate(time):
 
     for i in range(m):
         trajectories[step, :, i] = M[i].x
+        cost_mat[step, i] = M[i].cost
 
     # 6. Print debug info
     if DEBUG is True:
@@ -351,6 +353,7 @@ plot.plot_paths_3d(
     normalize=False,
     show=False,
 )
+plot.plot_cost(cost_mat, time, show=False)
 
 # Plot realized winding numbers vs the target ones
 windings: np.ndarray = invariants.paths2windings(trajectories[:, :2, :])

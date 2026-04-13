@@ -271,3 +271,58 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
         plt.show()
 
     return fig, axes
+
+
+def plot_cost(
+    cost: np.ndarray, time: np.ndarray, **kwargs
+) -> tuple[plt.Figure, plt.Axes]:
+    """
+    Plot the cost of each agent over time.
+
+    Args:
+        cost (np.ndarray): A 2D array of shape (n, m) representing n time steps of
+            m agents' costs. Each entry cost[t, i] gives the cost of agent i at
+            time step t.
+        time (np.ndarray): A 1D array of shape (n,) representing the time steps
+            corresponding to the cost values.
+        figsize (tuple[float, float], optional): The size of the figure in cm.
+        show_legend (bool, optional): Whether to show legend for the plot. Default is
+            False.
+        show (bool, optional): Whether to display the plot. Default is False.
+
+    Returns:
+        tuple[plt.Figure, plt.Axes]: The figure and axes objects for the plot.
+    """
+    # Parse kwargs
+    figsize: np.ndarray = kwargs.get("figsize", np.array([10, 10]))
+    show_legend: bool = kwargs.get("show_legend", False)
+    show: bool = kwargs.get("show", False)
+
+    # Validate inputs
+    if not isinstance(figsize, np.ndarray):
+        if not isinstance(figsize, (tuple, list)):
+            raise TypeError("Input 'figsize' must be a numpy array, tuple, or list.")
+        figsize = np.array(figsize)
+
+    # Initialize colormap
+    _, m = cost.shape
+    colors = plt.color_sequences["tab10"][:m]
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=figsize / 2.54)
+    for i in range(m):
+        ax.plot(time, cost[:, i], linewidth=1.3, color=colors[i], label=f"Agent {i+1}")
+
+    # Set limits and aspect
+    ax.set_xlabel("t (s)")
+    ax.set_ylabel("Cost")
+    ax.set_title("MPC Cost over time")
+    ax.legend()
+
+    if show_legend:
+        ax.legend()
+
+    if show:
+        plt.show()
+
+    return fig, ax
