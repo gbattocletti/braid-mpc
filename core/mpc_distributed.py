@@ -138,12 +138,12 @@ class DistributedMPC(MPC):
                 w = self.w_curr[j]
                 for k in range(1, self.K):
                     theta: ca.SX | ca.MX = ca.atan2(
-                        self.x[k, 1] - self.x_pred[j][k, 1],
-                        self.x[k, 0] - self.x_pred[j][k, 0],
+                        self.x_pred[j][k, 1] - self.x[k, 1],
+                        self.x_pred[j][k, 0] - self.x[k, 0],
                     )
                     theta_prev: ca.SX | ca.MX = ca.atan2(
-                        self.x[k - 1, 1] - self.x_pred[j][k - 1, 1],
-                        self.x[k - 1, 0] - self.x_pred[j][k - 1, 0],
+                        self.x_pred[j][k - 1, 1] - self.x[k - 1, 1],
+                        self.x_pred[j][k - 1, 0] - self.x[k - 1, 0],
                     )
                     w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
@@ -322,12 +322,12 @@ class DistributedMPC(MPC):
                 w: float = w_curr[j] if isinstance(w_curr, np.ndarray) else w_curr
                 for k in range(1, self.K):
                     theta: float = np.atan2(
-                        x[k, 1] - x_pred[j][k, 1],
-                        x[k, 0] - x_pred[j][k, 0],
+                        x_pred[j][k, 1] - x[k, 1],
+                        x_pred[j][k, 0] - x[k, 0],
                     )
                     theta_prev: float = np.atan2(
-                        x[k - 1, 1] - x_pred[j][k - 1, 1],
-                        x[k - 1, 0] - x_pred[j][k - 1, 0],
+                        x_pred[j][k - 1, 1] - x[k - 1, 1],
+                        x_pred[j][k - 1, 0] - x[k - 1, 0],
                     )
                     w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
 

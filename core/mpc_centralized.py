@@ -153,12 +153,12 @@ class CentralizedMPC(MPC):
                     w = self.w_curr[i, j]
                     for k in range(1, self.K + 1):
                         # theta: ca.SX | ca.MX = ca.atan2(
-                        #     self.x[i][k, 1] - self.x[j][k, 1],
-                        #     self.x[i][k, 0] - self.x[j][k, 0],
+                        #     self.x[j][k, 1] - self.x[i][k, 1],
+                        #     self.x[j][k, 0] - self.x[i][k, 0],
                         # )
                         # theta_prev: ca.SX | ca.MX = ca.atan2(
-                        #     self.x[i][k - 1, 1] - self.x[j][k - 1, 1],
-                        #     self.x[i][k - 1, 0] - self.x[j][k - 1, 0],
+                        #     self.x[j][k - 1, 1] - self.x[i][k - 1, 1],
+                        #     self.x[j][k - 1, 0] - self.x[i][k - 1, 0],
                         # )
                         # w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
                         dx = self.x[j][k, 0] - self.x[i][k, 0]
