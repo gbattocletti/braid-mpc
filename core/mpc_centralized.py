@@ -258,6 +258,19 @@ class CentralizedMPC(MPC):
             ]:
                 sol = self.ocp.debug  # try using the best solution found so far
             else:
+                g_val = self.ocp.debug.value(self.ocp.g)
+                lb_g = np.array(self.ocp.debug.value(self.ocp.lbg)).flatten()
+                ub_g = np.array((self.ocp.debug.value(self.ocp.ubg))).flatten()
+                violation = np.maximum(g_val - ub_g, 0) + np.maximum(lb_g - g_val, 0)
+                violation_idx = np.argsort(violation)[-10:]  # 10 largest violations
+                for idx in violation_idx:
+                    print(
+                        f"Constraint {idx}: "
+                        f"{self.ocp.debug.g_describe(idx)[158:-1]}."
+                        f"violation={violation[idx]:.4e}, "
+                        f"g={g_val[idx]:.4e}, "
+                        f"lb={lb_g[idx]:.4e}, ub={ub_g[idx]:.4e}"
+                    )
                 raise e
 
         # Return the solution object
