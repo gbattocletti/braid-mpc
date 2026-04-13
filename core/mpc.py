@@ -88,6 +88,7 @@ class MPC(ABC):
         self.x_min: np.ndarray | None = None  # minimum position state
         self.x_max: np.ndarray | None = None  # maximum position state
         self.d_min: float | None = None  # minimum distance between agents' positions
+        self.constraints: list = []  # for debugging purposes
 
     def __call__(
         self,
