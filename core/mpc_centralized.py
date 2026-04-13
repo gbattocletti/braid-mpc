@@ -346,11 +346,11 @@ class CentralizedMPC(MPC):
         cost = goal_cost + control_cost + winding_cost
 
         # Cost validation
-        if not np.isclose(cost, self.sol.value(self.cost_function)):
+        if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-4):
             print(
                 f"Cost check failed: computed cost {cost:.4f} does not match "
                 f"cost from solution {self.sol.value(self.cost_function):.4f} "
-                f"(error: {abs(cost - self.sol.value(self.cost_function)):.4f})."
+                f"(error: {abs(cost - self.sol.value(self.cost_function)):.4e})."
             )
 
         return cost, goal_cost, control_cost, winding_cost

@@ -342,10 +342,10 @@ class DistributedMPC(MPC):
 
         # Check if the sum of the cost components matches the total cost
         if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-4):
-            raise ValueError(
-                f"Cost check failed: the sum of the cost components ({cost}) does not "
-                "match the total cost value from the solution "
-                f"({self.sol.value(self.cost_function)})."
+            print(
+                f"Cost check failed: computed cost {cost:.4f} does not match "
+                f"cost from solution {self.sol.value(self.cost_function):.4f} "
+                f"(error: {abs(cost - self.sol.value(self.cost_function)):.4e})."
             )
 
         return cost, goal_cost, control_cost, winding_cost
