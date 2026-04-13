@@ -305,24 +305,67 @@ def plot_cost(
         figsize = np.array(figsize)
 
     # Initialize colormap
-    _, m = cost.shape
+    _, _, m = cost.shape
     colors = plt.color_sequences["tab10"][:m]
 
     # Create the plot
-    fig, ax = plt.subplots(figsize=figsize / 2.54)
-    for i in range(m):
-        ax.plot(time, cost[:, i], linewidth=1.3, color=colors[i], label=f"Agent {i+1}")
+    fig: plt.Figure
+    axes: np.ndarray[plt.Axes]
+    fig, axes = plt.subplots(
+        nrows=2,
+        ncols=2,
+        figsize=figsize / 2.54,
+        sharex=True,
+    )
+    for plot_idx in range(4):  # selects subplot and cost component to plot
+        row = plot_idx // 2
+        col = plot_idx % 2
+        ax: plt.Axes = axes[row, col]
+        for i in range(m):
+            ax.plot(
+                time,
+                cost[:, plot_idx, i],
+                linewidth=1.3,
+                color=colors[i],
+                label=f"Agent {i+1}",
+            )
 
-    # Set limits and aspect
-    ax.set_xlabel("t (s)")
-    ax.set_ylabel("Cost")
-    ax.set_title("MPC Cost over time")
-    ax.legend()
-
-    if show_legend:
+        # Set limits and aspect
+        ax.grid(
+            True,
+            which="major",
+            linestyle=":",
+            color="gray",
+            linewidth=0.5,
+            zorder=1,
+        )
+        ax.grid(
+            True,
+            which="minor",
+            linestyle=":",
+            color="gray",
+            linewidth=0.3,
+            zorder=1,
+        )
+        ax.minorticks_on()
+        ax.set_xlabel("t (s)")
+        ax.set_ylabel("Cost")
         ax.legend()
+        if show_legend:
+            ax.legend()
+
+        # Add title
+        match plot_idx:
+            case 0:
+                ax.set_title("Total Cost", fontsize=10)
+            case 1:
+                ax.set_title("Goal Cost", fontsize=10)
+            case 2:
+                ax.set_title("Control Cost", fontsize=10)
+            case 3:
+                ax.set_title("Winding Cost", fontsize=10)
 
     if show:
         plt.show()
 
-    return fig, ax
+    return fig, axes
