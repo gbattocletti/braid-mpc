@@ -292,6 +292,65 @@ class CentralizedMPC(MPC):
                 "_check_cost()."
             )
 
-        raise NotImplementedError(
-            "The _check_cost() method is not implemented yet for the centralized MPC."
-        )
+        # Extract the OCP parameters and solution values
+        x = [self.sol.value(x_i) for x_i in self.x]
+        x_goal = self.sol.value(self.x_goal)
+        w_curr = self.sol.value(self.w_curr)
+        w_target = self.sol.value(self.w_target)
+        u = [self.sol.value(u_i) for u_i in self.u]
+
+        # Goal tracking cost
+        goal_cost = 0
+        if self.alpha_g is not None and self.alpha_g > 0:
+            for i in range(self.m):
+                for k in range(1, self.K + 1):
+                    goal_cost += self.alpha_g * (
+                        (x[k, 0] - x_goal[i, 0]) ** 2 + (x[k, 1] - x_goal[i, 1]) ** 2
+                    )
+
+        # Control input cost
+        control_cost = 0
+        if self.alpha_u is not None and self.alpha_u > 0:
+            for i in range(self.m):
+                for k in range(self.K):
+                    control_cost += self.alpha_u * (u[i][k, :] @ self.R @ u[i][k, :].T)
+
+        # Winding cost
+        winding_cost = 0
+        if self.alpha_w is not None and np.any(self.alpha_w > 0):
+            for i in range(self.m):
+                for j in range(self.m):
+                    if i == j:
+                        continue  # skip self-winding
+
+                    # Compute winding number of i w.r.t. j at end of prediction horizon
+                    w = w_curr[i, j]
+                    for k in range(1, self.K + 1):
+                        theta = np.arctan2(
+                            x[j][k, 1] - x[i][k, 1],
+                            x[j][k, 0] - x[i][k, 0],
+                        )
+                        theta_prev = np.arctan2(
+                            x[j][k - 1, 1] - x[i][k - 1, 1],
+                            x[j][k - 1, 0] - x[i][k - 1, 0],
+                        )
+                        delta_theta = np.arctan2(
+                            np.sin(theta - theta_prev),
+                            np.cos(theta - theta_prev),
+                        )
+                        w += 1 / (2 * np.pi) * delta_theta
+
+                    winding_cost += self.alpha_w * (w_target[i, j] - w) ** 2
+
+        # Total cost
+        cost = goal_cost + control_cost + winding_cost
+
+        # Cost validation
+        if not np.isclose(cost, self.sol.value(self.cost_function)):
+            print(
+                f"Cost check failed: computed cost {cost:.4f} does not match "
+                f"cost from solution {self.sol.value(self.cost_function):.4f} "
+                f"(error: {abs(cost - self.sol.value(self.cost_function)):.4f})."
+            )
+
+        return cost, goal_cost, control_cost, winding_cost
