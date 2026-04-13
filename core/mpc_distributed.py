@@ -289,9 +289,10 @@ class DistributedMPC(MPC):
         # Goal tracking cost
         goal_cost = 0
         if self.alpha_g is not None and self.alpha_g > 0:
-            goal_cost += self.alpha_g * (
-                (x[self.K, 0] - x_goal[0]) ** 2 + (x[self.K, 1] - x_goal[1]) ** 2
-            )
+            for k in range(1, self.K + 1):
+                goal_cost += self.alpha_g * (
+                    (x[k, 0] - x_goal[0]) ** 2 + (x[k, 1] - x_goal[1]) ** 2
+                )
 
         # Goal progress cost
         if self.alpha_g_progress is not None and self.alpha_g_progress > 0:
