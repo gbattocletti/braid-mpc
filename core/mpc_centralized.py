@@ -27,6 +27,8 @@ class CentralizedMPC(MPC):
         self.solver_options["max_iter"] = 10_000
         self.solver_options["max_wall_time"] = 60.0  # [s]
         self.solver_options["max_cpu_time"] = 60.0  # [s]
+        self.solver_options["mu_strategy"] = "adaptive"
+        self.solver_options["warm_start_init_point"] = "yes"
 
     def _initialize_ocp(self) -> None:
         """
@@ -256,7 +258,7 @@ class CentralizedMPC(MPC):
                 "Maximum_CpuTime_Exceeded",
                 "Maximum_Iterations_Exceeded",
             ]:
-                sol = self.ocp.debug  # try using the best solution found so far
+                sol = self.ocp.debug  # FIXME solution attributes must be assigned
             else:
                 g_val = self.ocp.debug.value(self.ocp.g)
                 lb_g = np.array(self.ocp.debug.value(self.ocp.lbg)).flatten()
@@ -318,7 +320,8 @@ class CentralizedMPC(MPC):
             for i in range(self.m):
                 for k in range(1, self.K + 1):
                     goal_cost += self.alpha_g * (
-                        (x[k, 0] - x_goal[i, 0]) ** 2 + (x[k, 1] - x_goal[i, 1]) ** 2
+                        (x[i][k, 0] - x_goal[i, 0]) ** 2
+                        + (x[i][k, 1] - x_goal[i, 1]) ** 2
                     )
 
         # Control input cost
