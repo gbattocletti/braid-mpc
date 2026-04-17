@@ -13,10 +13,15 @@ from visualization import plot
 
 # User-defined settings
 DATA = "data/grids_m2_2.yaml"  # initial and goal locations, topological specification
-CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
+CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
+
+# Simulation and controller's properties
+DT: float = 0.1  # s
+K: int = 10  # time steps
+T: float = 60  # total simulation time (s)
 
 ## Preprocessing #######################################################################
 
@@ -45,8 +50,8 @@ plot.plot_paths_3d(paths, normalize=True, show=False)
 # Compute target winding numbers
 windings_target = invariants.paths2windings(
     paths,
-    upscale_factor=10,
-    intermediate_shape="linear",
+    upscale_factor=100,
+    intermediate_shape="spline",
 )  # (n_windings, m, m)
 n_windings = windings_target.shape[0]  # length of the winding number vector
 
@@ -54,16 +59,20 @@ n_windings = windings_target.shape[0]  # length of the winding number vector
 np.random.seed(1312)
 
 ## Controllers and agents setup ########################################################
-# Initialize controller's properties
-dt = 0.1  # s
-K = 10  # time steps
 
 # Create agents
 M = [agent.Agent(i) for i in range(m)]
 for i in range(m):
-    M[i].dt = dt
+    M[i].dt = DT
     M[i].x = x_init[:, i]
     M[i].x_goal = x_goal[:, i]
+    M[i].x_opt = np.tile(M[i].x, (K + 1, 1))  # initialize with constant state
+    M[i].u_opt = np.zeros((K, 2))  # initialize with zero control inputs
+    M[i].t_sol = np.inf
+    M[i].cost = np.inf
+    M[i].cost_g = np.inf
+    M[i].cost_u = np.inf
+    M[i].cost_w = np.inf
 
 # Initialize MPC controller
 dynamics = "unicycle" if USE_ROBOTARIUM is True else "single_integrator"
@@ -73,11 +82,11 @@ elif CONTROL_ARCHITECTURE == "centralized":
     mpc = mpc_centralized.CentralizedMPC(dynamics=dynamics)
 else:
     raise ValueError(f"Invalid control architecture: {CONTROL_ARCHITECTURE}")
-mpc.dt = dt
+mpc.dt = DT
 mpc.K = K
 mpc.m = m
-mpc.alpha_u = 0.01
-mpc.alpha_g = 0.0
+mpc.alpha_u = 0.001
+mpc.alpha_g = 0
 mpc.alpha_w = 10
 mpc.d_min = 1
 # mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
@@ -170,15 +179,16 @@ if USE_ROBOTARIUM is True:
 ## Main simulation loop ################################################################
 
 # Initialize time vector
-T: float = 15  # total simulation time (s)
-time: np.ndarray = np.arange(0, T + dt, dt)
+time: np.ndarray = np.arange(0, T + DT, DT)
 
 # Initialize matrix to store traveled trajectories
 trajectories: np.ndarray = np.zeros((len(time), mpc.n_x, m))  # realized trajectories
-cost_mat: np.ndarray = np.zeros((len(time), m))  # cost at each time step for each agent
+cost_mat: np.ndarray = np.zeros((len(time), 4, m))  # cost for each agent (4 terms)
 theta: np.ndarray = np.zeros((m, m))  # relative headings between the agents
 theta_prev: np.ndarray = invariants.relative_headings(x_init)  # prev relative headings
 w_curr: np.ndarray = np.zeros((m, m))  # current winding numbers between the agents
+w_curr_mat: np.ndarray = np.zeros((len(time), m, m))  # save current WN for plotting
+w_target_resampled: np.ndarray = np.zeros((len(time), m, m))  # resampled for plotting
 
 for step, t in enumerate(time):
 
@@ -192,11 +202,12 @@ for step, t in enumerate(time):
     # likely progress at different rates, we can either let every pairing to have its
     # own tau_target_ij, or compute a single tau_target based on the average progress
     # across all pairings.
-    tau_target = min((t + K * dt) / T, 1)  # cap target time at the end of the braid
+    tau_target = min([(t + K * DT) / T, 1])  # cap target winding at end of braid
     w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
+    w_target_resampled[step, :, :] = w_target  # save target WN for plotting
 
     # Compute winding number weights depending on distance between agents
-    alpha_w = invariants.compute_winding_weights(np.array([M[i].x for i in range(m)]))
+    # alpha_w = invariants.compute_winding_weights(np.array([M[i].x for i in range(m)]))
 
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
@@ -210,6 +221,8 @@ for step, t in enumerate(time):
 
         # Solve local MPC problem for each agent
         for i in range(m):
+            if i == 1:  # TEMP
+                continue  # TEMP
             (u_opt, x_opt, cost, t_sol) = mpc.solve(
                 x_0=M[i].x,
                 x_goal=M[i].x_goal,
@@ -227,10 +240,14 @@ for step, t in enumerate(time):
 
             # Compute individual components of the cost function
             if DEBUG is True:
-                _, cost_u, cost_g, cost_w = mpc.check_cost()
+                _, cost_g, cost_u, cost_w = mpc.check_cost()
                 M[i].cost_u = cost_u
                 M[i].cost_g = cost_g
                 M[i].cost_w = cost_w
+                cost_mat[step, 0, i] = cost
+                cost_mat[step, 1, i] = cost_g
+                cost_mat[step, 2, i] = cost_u
+                cost_mat[step, 3, i] = cost_w
 
     # Centralized MPC controller
     elif mpc.architecture == "centralized":
@@ -254,6 +271,13 @@ for step, t in enumerate(time):
             M[i].cost = cost  # same cost for all agents in centralized MPC
             M[i].t_sol = t_sol  # same solution time for all agents in centralized MPC
 
+        if DEBUG is True:
+            _, cost_g, cost_u, cost_w = mpc.check_cost()
+            cost_mat[step, 0, :] = cost
+            cost_mat[step, 1, :] = cost_g
+            cost_mat[step, 2, :] = cost_u
+            cost_mat[step, 3, :] = cost_w
+
     # Sanity check: verify that the predicted trajectories do not lead to collisions
     if DEBUG is True:
         for k in range(K):
@@ -261,10 +285,14 @@ for step, t in enumerate(time):
                 for j in range(i + 1, m):
                     dist_ij = np.linalg.norm(M[i].x_opt[k, :2] - M[j].x_opt[k, :2])
                     if dist_ij < mpc.d_min:
-                        print(
-                            f"Warning: predicted trajectories of agents {i} and {j} "
-                            f"are too close at time step {k} (distance: {dist_ij:.4f})"
-                        )
+                        if (
+                            abs(dist_ij - mpc.d_min) > 1e-3
+                        ):  # allow small numerical errors
+                            print(
+                                f"Warning: predicted trajectories of agents {i} and  "
+                                f"{j} are too close at time step {k} "
+                                f"(distance: {dist_ij:.4e})"
+                            )
 
     # 3. Take one step in the environment and get new state
     if USE_ROBOTARIUM is True:
@@ -280,7 +308,7 @@ for step, t in enumerate(time):
         # Simulate with Robotarium
         # NOTE: The robotarium uses a fixed time step of 0.033s, so we need to call the
         # step function multiple times to match the desired MPC time step (dt).
-        for _ in range(int(dt / r.time_step)):
+        for _ in range(int(DT / r.time_step)):
             r.set_velocities(range(m), v_vec)
             r.step()
             x_meas = r.get_poses()  # get new states (required after each r.step())
@@ -300,23 +328,21 @@ for step, t in enumerate(time):
             M[i].step(M[i].u_opt[0])
 
     # 4. Update current winding numbers
-    x_all = np.array([M[i].x for i in range(m)]).T  # reshape to m x n_x
-    theta = invariants.relative_headings(x_all)
+    theta = invariants.relative_headings(np.array([M[i].x for i in range(m)]).T)
     w_curr = w_curr + 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
+    w_curr_mat[step, :, :] = w_curr  # save w_curr for plotting
     theta_prev = theta
 
-    # 5. Save traveled trajectory
+    # 5. Save data for plotting
     if DEBUG is True:
         prediction_error = np.linalg.norm(M[i].x_opt[1, :2] - M[i].x[:2])
-        if prediction_error > 0.001:
+        if prediction_error > 1e-3:  # allow small numerical errors
             print(
                 f"Warning: large prediction error for agent {i} at time {t:.2f}s "
-                f"(error: {prediction_error:.2f})"
+                f"(error: {prediction_error:.4e})"
             )
-
     for i in range(m):
         trajectories[step, :, i] = M[i].x
-        cost_mat[step, i] = M[i].cost
 
     # 6. Print debug info
     if DEBUG is True:
@@ -329,12 +355,12 @@ for step, t in enumerate(time):
                 f"x(k+1): [{M[i].x[0]:5.2f},{M[i].x[1]:5.2f},{M[i].x[2]:5.2f}], "
                 f"u*(0|k): [{M[i].u_opt[0, 0]: 4.2f},{M[i].u_opt[0, 1]: 4.2f}], "
                 f"t_sol: {M[i].t_sol:.2f}s, "
-                f"cost: {M[i].cost:.2f}",
+                f"cost: {M[i].cost:.2e}",
                 end="",
             )
             if mpc.architecture == "distributed":
                 print(
-                    f" ({M[i].cost_u:.2f}, {M[i].cost_g:.2f}, {M[i].cost_w:.2f})"
+                    f" ({M[i].cost_u:.2e}, {M[i].cost_g:.2e}, {M[i].cost_w:.2e})"
                 )  # print individual components of the cost function
             else:
                 print("")
@@ -353,11 +379,15 @@ plot.plot_paths_3d(
     normalize=False,
     show=False,
 )
-plot.plot_cost(cost_mat, time, show=False)
+
+# Plot cost over time
+if DEBUG is True:
+    plot.plot_cost(cost_mat, time, show=False)
 
 # Plot realized winding numbers vs the target ones
 windings: np.ndarray = invariants.paths2windings(trajectories[:, :2, :])
-plot.plot_windings(windings, windings_ref=windings_target, show=False)
+plot.plot_windings(windings, time, windings_ref=w_target_resampled, show=False)
+plot.plot_windings(w_curr_mat, time, windings_ref=w_target_resampled, show=False)
 
 # Show all plots
 if SHOW_PLOTS is True:
