@@ -15,14 +15,17 @@ def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         paths (np.ndarray): A 3D array of shape (n, 2, m) representing n time steps of
             m agents' positions in 2D space. Each entry paths[t, :, i] gives the
             (x, y) coordinates of agent i at time step t.
+        show_legend (bool, optional): Whether to show legend for the plot. Default is
+            False.
         show (bool, optional): Whether to display the plot. Default is False.
 
     Returns:
         tuple[plt.Figure, plt.Axes]: The figure and axes objects for the plot.
     """
     # Parse kwargs
-    show = kwargs.get("show", False)
     figsize = kwargs.get("figsize", np.array([10, 10]))
+    show_legend = kwargs.get("show_legend", False)
+    show = kwargs.get("show", False)
 
     # Validate inputs
     if not isinstance(paths, np.ndarray):
@@ -58,8 +61,9 @@ def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_title("2D Paths of Agents")
-    ax.legend()
     ax.grid(True)
+    if show_legend is True:
+        ax.legend()
 
     if show is True:
         plt.show()
@@ -84,6 +88,8 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
             Default is (10, 10).
         pov (list[float], optional): A list of three floats representing the elevation,
             azimuth, and roll angles for the 3D plot's point of view.
+        show_legend (bool, optional): Whether to show legend for the plot. Default is
+            False.
         show (bool, optional): Whether to display the plot. Default is False.
 
     Returns:
@@ -100,6 +106,7 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     y_lims: np.ndarray = kwargs.get("y_lims", (-1, paths.shape[2]))
     figsize: np.ndarray = kwargs.get("figsize", np.array([10, 10]))
     pov: list[float] = kwargs.get("pov", [15, 35, 0])
+    show_legend: bool = kwargs.get("show_legend", False)
     show: bool = kwargs.get("show", False)
 
     # Validate inputs
@@ -145,7 +152,8 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     ax.set_ylabel("y")
     ax.set_zlabel("t")
     ax.set_title("3D Paths of Agents Over Time")
-    ax.legend()
+    if show_legend is True:
+        ax.legend()
 
     if show:
         plt.show()
@@ -352,7 +360,6 @@ def plot_cost(
         ax.minorticks_on()
         ax.set_xlabel("t (s)")
         ax.set_ylabel("Cost")
-        ax.legend()
         if show_legend:
             ax.legend()
 
