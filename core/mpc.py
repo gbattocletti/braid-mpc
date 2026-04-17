@@ -314,7 +314,7 @@ class MPC(ABC):
         )
 
     @abstractmethod
-    def check_cost(self) -> float:
+    def check_cost(self) -> tuple[float, float, float, float]:
         """
         Compute the cost function value for the current solution. This is a helper
         method intended for debugging and testing.
