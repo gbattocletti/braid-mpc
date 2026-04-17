@@ -9,6 +9,7 @@ class DistributedMPC(MPC):
 
     def __init__(self, dynamics: str = "single_integrator") -> None:
         super().__init__(dynamics=dynamics)
+        self.id: int = 0  # agent id (index in the list of agents), used for indexing
         self.architecture = "distributed"
         self.solver_options["print_level"] = 0
         self.solver_options["max_wall_time"] = 10.0  # [s]
@@ -41,6 +42,8 @@ class DistributedMPC(MPC):
         self.w_curr = self.ocp.parameter(self.m - 1)  # current winding number (m-1, )
         self.w_target = self.ocp.parameter(self.m - 1)  # current winding number (m-1, )
         self.x_pred = [self.ocp.parameter(self.K, self.n_x) for _ in range(self.m - 1)]
+        self.alpha_g = self.ocp.parameter()  # scalar
+        self.alpha_w = self.ocp.parameter(self.m, self.m)
 
         # Constraints
         # Initial state constraint
@@ -105,50 +108,42 @@ class DistributedMPC(MPC):
         self.cost_function = 0
 
         # Goal tracking cost (terminal cost)
-        if self.alpha_g is not None and self.alpha_g > 0:
-            for k in range(1, self.K + 1):
-                self.cost_function += self.alpha_g * (
-                    (self.x[k, 0] - self.x_goal[0]) ** 2
-                    + (self.x[k, 1] - self.x_goal[1]) ** 2
-                )
+        for k in range(1, self.K + 1):
+            self.cost_function += self.alpha_g * (
+                (self.x[k, 0] - self.x_goal[0]) ** 2
+                + (self.x[k, 1] - self.x_goal[1]) ** 2
+            )
 
         # Control input cost
-        if self.alpha_u is not None and self.alpha_u > 0:
-            for k in range(self.K):
-                self.cost_function += self.alpha_u * (
-                    self.u[k, :] @ self.R @ self.u[k, :].T
-                )
+        for k in range(self.K):
+            self.cost_function += self.alpha_u * (
+                self.u[k, :] @ self.R @ self.u[k, :].T
+            )
 
         # Winding cost
         # NOTE: the winding cost is only computed w.r.t. other agents, and not w.r.t.
         # itself, since the winding number w.r.t. itself is always 0. Therefore only m-1
         # terms are summed in the winding cost.
-        if self.alpha_w is not None and np.any(self.alpha_w > 0):
-            for j in range(self.m - 1):
+        for j in range(self.m - 1):
 
-                # Get weight for agent j
-                alpha_w_j: float = self.alpha_w
-                # if isinstance(self.alpha_w, np.ndarray):
-                #     self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
-                #     alpha_w_j = self.alpha_w[j]
-                # else:
-                #     alpha_w_j = self.alpha_w
+            # Get weight for agent j
+            alpha_w_j: float = self.alpha_w[self.id, j]
 
-                # Compute winding number w.r.t. j at the end of prediction horizon
-                w = self.w_curr[j]
-                for k in range(1, self.K):
-                    theta: ca.MX = ca.atan2(
-                        self.x_pred[j][k, 1] - self.x[k, 1],
-                        self.x_pred[j][k, 0] - self.x[k, 0],
-                    )
-                    theta_prev: ca.MX = ca.atan2(
-                        self.x_pred[j][k - 1, 1] - self.x[k - 1, 1],
-                        self.x_pred[j][k - 1, 0] - self.x[k - 1, 0],
-                    )
-                    w = w + 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
+            # Compute winding number w.r.t. j at the end of prediction horizon
+            w = self.w_curr[j]
+            for k in range(1, self.K):
+                theta: ca.MX = ca.atan2(
+                    self.x_pred[j][k, 1] - self.x[k, 1],
+                    self.x_pred[j][k, 0] - self.x[k, 0],
+                )
+                theta_prev: ca.MX = ca.atan2(
+                    self.x_pred[j][k - 1, 1] - self.x[k - 1, 1],
+                    self.x_pred[j][k - 1, 0] - self.x[k - 1, 0],
+                )
+                w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
-                # Add winding cost to the total cost function
-                self.cost_function += alpha_w_j * (self.w_target[j] - w) ** 2
+            # Add winding cost to the total cost function
+            self.cost_function += alpha_w_j * (self.w_target[j] - w) ** 2
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
@@ -288,54 +283,39 @@ class DistributedMPC(MPC):
 
         # Goal tracking cost
         goal_cost = 0
-        if self.alpha_g is not None and self.alpha_g > 0:
-            for k in range(1, self.K + 1):
-                goal_cost += self.alpha_g * (
-                    (x[k, 0] - x_goal[0]) ** 2 + (x[k, 1] - x_goal[1]) ** 2
-                )
-
-        # Goal progress cost
-        if self.alpha_g_progress is not None and self.alpha_g_progress > 0:
-            goal_cost += self.alpha_g_progress * (
-                (x[self.K, 0] - x_goal[0]) ** 2 + (x[self.K, 1] - x_goal[1]) ** 2
-            ) - ((x[0, 0] - x_goal[0]) ** 2 + (x[0, 1] - x_goal[1]) ** 2)
+        for k in range(1, self.K + 1):
+            goal_cost += self.ocp.value(self.alpha_g) * (
+                (x[k, 0] - x_goal[0]) ** 2 + (x[k, 1] - x_goal[1]) ** 2
+            )
 
         # Control input cost
         control_cost = 0
-        if self.alpha_u is not None and self.alpha_u > 0:
-            for k in range(self.K):
-                control_cost += self.alpha_u * (u[k, :] @ self.R @ u[k, :].T)
+        for k in range(self.K):
+            control_cost += self.alpha_u * (u[k, :] @ self.R @ u[k, :].T)
 
         # Winding cost
         winding_cost = 0
-        if self.alpha_w is not None and np.any(self.alpha_w > 0):
-            for j in range(self.m - 1):
+        for j in range(self.m - 1):
 
-                # Get weight for agent j
-                if isinstance(self.alpha_w, np.ndarray):
-                    self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
-                    alpha_w_j = self.alpha_w[j]
-                else:
-                    alpha_w_j = self.alpha_w
+            # Get weight for agent j
+            alpha_w_j = self.ocp.value(self.alpha_w[self.id, j])
 
-                # Compute winding number w.r.t. j at the end of prediction horizon
-                w: float = w_curr[j] if isinstance(w_curr, np.ndarray) else w_curr
-                for k in range(1, self.K):
-                    theta: float = np.atan2(
-                        x_pred[j][k, 1] - x[k, 1],
-                        x_pred[j][k, 0] - x[k, 0],
-                    )
-                    theta_prev: float = np.atan2(
-                        x_pred[j][k - 1, 1] - x[k - 1, 1],
-                        x_pred[j][k - 1, 0] - x[k - 1, 0],
-                    )
-                    w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
-
-                # Cumulate winding costs
-                w_target_j = (
-                    w_target[j] if isinstance(w_target, np.ndarray) else w_target
+            # Compute winding number w.r.t. j at the end of prediction horizon
+            w: float = w_curr[j] if isinstance(w_curr, np.ndarray) else w_curr
+            for k in range(1, self.K):
+                theta: float = np.atan2(
+                    x_pred[j][k, 1] - x[k, 1],
+                    x_pred[j][k, 0] - x[k, 0],
                 )
-                winding_cost += alpha_w_j * (w_target_j - w) ** 2
+                theta_prev: float = np.atan2(
+                    x_pred[j][k - 1, 1] - x[k - 1, 1],
+                    x_pred[j][k - 1, 0] - x[k - 1, 0],
+                )
+                w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
+
+            # Cumulate winding costs
+            w_target_j = w_target[j] if isinstance(w_target, np.ndarray) else w_target
+            winding_cost += alpha_w_j * (w_target_j - w) ** 2
 
         # Total cost
         cost = goal_cost + control_cost + winding_cost

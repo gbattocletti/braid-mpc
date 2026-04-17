@@ -13,7 +13,7 @@ from visualization import plot
 
 # User-defined settings
 DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
-CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
+CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
@@ -22,6 +22,13 @@ DEBUG = True
 DT: float = 0.1  # s
 K: int = 10  # time steps
 T: float = 30  # total simulation time (s)
+
+# Cost function weights
+ALPHA_U: float = 0.001  # control cost (constant).
+ALPHA_G: float = 1  # scaling factor for goal tracking cost. 0 to disable goal tracking
+EXP_GOAL: int = 30  # exponent for time-varying goal cost weight
+ALPHA_W: float = 10  # scaling factor for winding cost. 0 to disable winding tracking
+USE_TIME_VARYING_WEIGHTS: bool = True
 
 ## Preprocessing #######################################################################
 
@@ -85,9 +92,7 @@ else:
 mpc.dt = DT
 mpc.K = K
 mpc.m = m
-mpc.alpha_u = 0.001
-mpc.alpha_g = 0
-mpc.alpha_w = 10
+mpc.alpha_u = ALPHA_U  # constant (in general)
 mpc.d_min = 1
 # mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 # mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
@@ -207,11 +212,19 @@ for step, t in enumerate(time):
     w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
     w_target_resampled[step, :, :] = w_target  # save target WN for plotting
 
-    # Compute winding number weights depending on distance between agents
-    # alpha_w = invariants.compute_winding_weights(np.array([M[i].x for i in range(m)]))
+    # Update time varying weights
+    if step == 0 or USE_TIME_VARYING_WEIGHTS is True:
+        alpha_g = ALPHA_G * (t / T) ** EXP_GOAL  # increase goal cost weight over time
+        alpha_w = ALPHA_W * invariants.compute_winding_weights(
+            np.array([M[i].x for i in range(m)]),
+            d_threshold=None,
+        )
+        mpc.set_alpha_g(alpha_g)  # NOTE: required at least once before solving the MPC
+        mpc.set_alpha_w(alpha_w)  # NOTE: required at least once before solving the MPC
 
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
+
         # Collect predicted trajectories of all agents
         for i in range(m):
             x_pred[0:, :, i] = M[i].x
@@ -222,6 +235,7 @@ for step, t in enumerate(time):
 
         # Solve local MPC problem for each agent
         for i in range(m):
+            mpc.id = i
             (u_opt, x_opt, cost, t_sol) = mpc.solve(
                 x_0=M[i].x,
                 x_goal=M[i].x_goal,

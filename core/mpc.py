@@ -73,11 +73,10 @@ class MPC(ABC):
         self.w_target: ca.Opti.parameter  # target winding number w.r.t. agents
 
         # Cost function weights and matrices
-        self.alpha_u: float | None = None  # control input cost weight
-        self.alpha_g: float | None = None  # goal tracking cost weight
-        self.alpha_g_progress: float | None = None  # weight for progress toward goal
-        self.alpha_w: np.ndarray | float | None = None  # winding cost weight
-        self.R: np.ndarray | None = None  # control input cost matrix
+        self.alpha_g: ca.Opti.parameter  # goal tracking cost weight (time varying)
+        self.alpha_u: float  # control input cost weight (constant)
+        self.R: np.ndarray  # control input cost matrix (constant)
+        self.alpha_w: ca.Opti.parameter  # winding cost weight (time varying)
 
         # Constraints
         self.u_min: np.ndarray | None = None
@@ -131,6 +130,46 @@ class MPC(ABC):
                 the range (-pi, pi].
         """
         return ca.atan2(ca.sin(angle_1 - angle_2), ca.cos(angle_1 - angle_2))
+
+    def set_alpha_g(self, alpha_g: float) -> None:
+        """
+        Set the goal tracking cost weight.
+
+        Args:
+            alpha_g (float): goal tracking cost weight
+
+        Returns:
+            None
+        """
+        self.ocp.set_value(self.alpha_g, alpha_g)
+
+    def set_alpha_w(self, alpha_w: np.ndarray | float) -> None:
+        """
+        Set the winding cost weight.
+
+        Args:
+            alpha_w (np.ndarray | float): winding cost weight matrix of shape (m, m) or
+                a scalar (to use the same weight for all agent pairs)
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: if alpha_w is a numpy array with incorrect shape
+            TypeError: if alpha_w is not a scalar or a numpy array
+        """
+        if isinstance(alpha_w, np.ndarray) and alpha_w.shape == (self.m, self.m):
+            pass
+        elif isinstance(alpha_w, np.ndarray) and alpha_w.shape != (self.m, self.m):
+            raise ValueError(
+                f"alpha_w must have shape ({self.m}, {self.m}), "
+                f"but got {alpha_w.shape}."
+            )
+        elif isinstance(alpha_w, (int, float)):
+            alpha_w = alpha_w * np.ones((self.m, self.m))
+        else:
+            raise TypeError("alpha_w must be a scalar or a numpy array.")
+        self.ocp.set_value(self.alpha_w, alpha_w)
 
     def initialize_ocp(self) -> None:
         """
