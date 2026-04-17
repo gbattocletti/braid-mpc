@@ -38,15 +38,16 @@ def relative_headings(poses: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: A 2D array of shape (m, m) representing the relative headings
             between each pair of agents. The entry at [i, j] gives the angle from
-            agent i to agent j in radians. The relative headings matrix is symmetrical
-            with zeros on the main diagonal.
+            agent i to agent j in radians. The relative headings matrix is skew
+            symmetric.
     """
     # Remove heading from poses
-    poses = poses[:2, :]  # (2, m)
+    pos = poses[:2, :]  # (2, m)
 
     # Compute relative headings
-    diff = poses[:, np.newaxis, :] - poses[np.newaxis, :, :]
-    headings = np.arctan2(diff[:, :, 1], diff[:, :, 0])  # (m, m)
+    dx = pos[0][None, :] - pos[0][:, None]  # (m, m), dx[i,j] = x_j - x_i
+    dy = pos[1][None, :] - pos[1][:, None]
+    headings = np.arctan2(dy, dx)  # (m, m), skew-symmetric
 
     return headings
 
