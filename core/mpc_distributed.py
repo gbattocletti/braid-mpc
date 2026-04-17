@@ -127,25 +127,25 @@ class DistributedMPC(MPC):
             for j in range(self.m - 1):
 
                 # Get weight for agent j
-                alpha_w_j: float
-                if isinstance(self.alpha_w, np.ndarray):
-                    self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
-                    alpha_w_j = self.alpha_w[j]
-                else:
-                    alpha_w_j = self.alpha_w
+                alpha_w_j: float = self.alpha_w
+                # if isinstance(self.alpha_w, np.ndarray):
+                #     self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
+                #     alpha_w_j = self.alpha_w[j]
+                # else:
+                #     alpha_w_j = self.alpha_w
 
                 # Compute winding number w.r.t. j at the end of prediction horizon
                 w = self.w_curr[j]
                 for k in range(1, self.K):
-                    theta: ca.SX | ca.MX = ca.atan2(
+                    theta: ca.MX = ca.atan2(
                         self.x_pred[j][k, 1] - self.x[k, 1],
                         self.x_pred[j][k, 0] - self.x[k, 0],
                     )
-                    theta_prev: ca.SX | ca.MX = ca.atan2(
+                    theta_prev: ca.MX = ca.atan2(
                         self.x_pred[j][k - 1, 1] - self.x[k - 1, 1],
                         self.x_pred[j][k - 1, 0] - self.x[k - 1, 0],
                     )
-                    w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
+                    w = w + 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
                 # Add winding cost to the total cost function
                 self.cost_function += alpha_w_j * (self.w_target[j] - w) ** 2
