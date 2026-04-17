@@ -12,7 +12,7 @@ from visualization import plot
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m2_2.yaml"  # initial and goal locations, topological specification
+DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
@@ -21,7 +21,7 @@ DEBUG = True
 # Simulation and controller's properties
 DT: float = 0.1  # s
 K: int = 10  # time steps
-T: float = 60  # total simulation time (s)
+T: float = 30  # total simulation time (s)
 
 ## Preprocessing #######################################################################
 
@@ -189,6 +189,7 @@ theta_prev: np.ndarray = invariants.relative_headings(x_init)  # prev relative h
 w_curr: np.ndarray = np.zeros((m, m))  # current winding numbers between the agents
 w_curr_mat: np.ndarray = np.zeros((len(time), m, m))  # save current WN for plotting
 w_target_resampled: np.ndarray = np.zeros((len(time), m, m))  # resampled for plotting
+t_sol_mat: np.ndarray = np.zeros((len(time), m))  # solution time for each agent
 
 for step, t in enumerate(time):
 
@@ -221,8 +222,6 @@ for step, t in enumerate(time):
 
         # Solve local MPC problem for each agent
         for i in range(m):
-            if i == 1:  # TEMP
-                continue  # TEMP
             (u_opt, x_opt, cost, t_sol) = mpc.solve(
                 x_0=M[i].x,
                 x_goal=M[i].x_goal,
@@ -238,7 +237,7 @@ for step, t in enumerate(time):
             M[i].cost = cost
             M[i].t_sol = t_sol
 
-            # Compute individual components of the cost function
+            # Store individual components of the cost function and solve time
             if DEBUG is True:
                 _, cost_g, cost_u, cost_w = mpc.check_cost()
                 M[i].cost_u = cost_u
@@ -248,6 +247,7 @@ for step, t in enumerate(time):
                 cost_mat[step, 1, i] = cost_g
                 cost_mat[step, 2, i] = cost_u
                 cost_mat[step, 3, i] = cost_w
+                t_sol_mat[step, i] = t_sol
 
     # Centralized MPC controller
     elif mpc.architecture == "centralized":
@@ -273,10 +273,15 @@ for step, t in enumerate(time):
 
         if DEBUG is True:
             _, cost_g, cost_u, cost_w = mpc.check_cost()
+            for i in range(m):
+                M[i].cost_u = cost_u  # same cost for all in centralized MPC
+                M[i].cost_g = cost_g
+                M[i].cost_w = cost_w
             cost_mat[step, 0, :] = cost
             cost_mat[step, 1, :] = cost_g
             cost_mat[step, 2, :] = cost_u
             cost_mat[step, 3, :] = cost_w
+            t_sol_mat[step, :] = t_sol  # same t_sol for all agents
 
     # Sanity check: verify that the predicted trajectories do not lead to collisions
     if DEBUG is True:
@@ -356,18 +361,31 @@ for step, t in enumerate(time):
                 f"u*(0|k): [{M[i].u_opt[0, 0]: 4.2f},{M[i].u_opt[0, 1]: 4.2f}], "
                 f"t_sol: {M[i].t_sol:.2f}s, "
                 f"cost: {M[i].cost:.2e}",
-                end="",
+                f"({M[i].cost_g:.2e}, {M[i].cost_u:.2e}, {M[i].cost_w:.2e})",
             )
-            if mpc.architecture == "distributed":
-                print(
-                    f" ({M[i].cost_u:.2e}, {M[i].cost_g:.2e}, {M[i].cost_w:.2e})"
-                )  # print individual components of the cost function
-            else:
-                print("")
 
 # Call robotarium termination function
 if USE_ROBOTARIUM is True:
     r.call_at_scripts_end()
+
+## Compute stats #######################################################################
+if DEBUG is True:
+    t_sol_avg = np.mean(t_sol_mat, axis=0)
+    t_sol_std = np.std(t_sol_mat, axis=0)
+    t_sol_max = np.max(t_sol_mat, axis=0)
+
+    if mpc.architecture == "distributed":
+        print("\nAverage solution time for each agent:")
+        for i in range(m):
+            print(
+                f"Agent {i}: {t_sol_avg[i]:.2f}s (std: {t_sol_std[i]:.2f}s, "
+                f"max: {t_sol_max[i]:.2f}s)"
+            )
+    else:
+        print(
+            f"\nAverage solution time: {t_sol_avg[0]:.2f}s "
+            f"(std: {t_sol_std[0]:.2f}s, max: {t_sol_max[0]:.2f}s)"
+        )
 
 ## Evaluate results and show plots #####################################################
 
@@ -385,8 +403,10 @@ if DEBUG is True:
     plot.plot_cost(cost_mat, time, show=False)
 
 # Plot realized winding numbers vs the target ones
-windings: np.ndarray = invariants.paths2windings(trajectories[:, :2, :])
-plot.plot_windings(windings, time, windings_ref=w_target_resampled, show=False)
+# NOTE: the commented lines provide an alternative way to compute the realized winding
+# numbers which can be used as a sanity check during debugging
+# windings: np.ndarray = invariants.paths2windings(trajectories[:, :2, :])
+# plot.plot_windings(windings, time, windings_ref=w_target_resampled, show=False)
 plot.plot_windings(w_curr_mat, time, windings_ref=w_target_resampled, show=False)
 
 # Show all plots
