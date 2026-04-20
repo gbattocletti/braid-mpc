@@ -452,16 +452,13 @@ plot.plot_windings(w_curr_mat, time, windings_ref=w_target_resampled, show=False
 # Show all plots (blocking)
 if SHOW_PLOTS is True:
 
-    def _close_all(_):
-        plt.close("all")
+    def _close_all(event):
+        if event.key in ("q", "escape"):
+            plt.close("all")
 
     for num in plt.get_fignums():
         fig = plt.figure(num)
-        fig.canvas.mpl_connect("close_event", _close_all)
-        fig.canvas.mpl_connect(
-            "key_press_event",
-            lambda e: _close_all(e) if e.key in ("q", "escape") else None,
-        )
+        fig.canvas.mpl_connect("key_press_event", _close_all)
 
     print("\nScript terminated. Press 'q' or 'escape' to close all plots.")
 
