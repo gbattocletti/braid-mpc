@@ -4,6 +4,7 @@ import casadi as ca
 import numpy as np
 
 from core.mpc import MPC
+from utils import invariants
 
 
 class CentralizedMPC(MPC):
@@ -334,10 +335,7 @@ class CentralizedMPC(MPC):
                         x[j][k - 1, 1] - x[i][k - 1, 1],
                         x[j][k - 1, 0] - x[i][k - 1, 0],
                     )
-                    delta_theta = np.arctan2(
-                        np.sin(theta - theta_prev),
-                        np.cos(theta - theta_prev),
-                    )
+                    delta_theta = invariants.angle_diff(theta, theta_prev)
                     w += 1 / (2 * np.pi) * delta_theta
 
                 winding_cost += alpha_w_ij * (w_target[i, j] - w) ** 2
