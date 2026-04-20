@@ -6,13 +6,13 @@ import rps.robotarium as rb
 from matplotlib import patches
 
 from core import agent, mpc_centralized, mpc_distributed
-from utils import invariants, io, robotarium_bridge
+from utils import geometry, invariants, io, robotarium_bridge
 from visualization import plot
 
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m2_1.yaml"  # initial and goal locations, topological specification
+DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
@@ -116,8 +116,32 @@ x_pred = np.zeros([K + 1, mpc.n_x, m]) if mpc.architecture == "distributed" else
 x_prev = np.zeros([K + 1, mpc.n_x]) if mpc.architecture == "distributed" else None
 
 ## Simulation setup ####################################################################
+
+# Check that the initial and final positions are admissible for collision avoidance
+init_ok = geometry.check_positions(
+    x_init,
+    d_min=mpc.d_min,
+    dynamics=mpc.dynamics,
+    u_max=mpc.u_max,
+    dt=mpc.dt,
+    verbose=True,
+)
+goal_ok = geometry.check_positions(
+    x_goal,
+    d_min=mpc.d_min,
+    dynamics=mpc.dynamics,
+    u_max=mpc.u_max,
+    dt=mpc.dt,
+    verbose=True,
+)
+if not init_ok:
+    raise ValueError("Initial positions are not admissible for collision avoidance.")
+if not goal_ok:
+    raise ValueError("Goal positions are not admissible for collision avoidance.")
+
+# Setup robotarium
 if USE_ROBOTARIUM is True:
-    # Initialize robotarium
+
     x_init_robotarium: np.ndarray = robotarium_bridge.real2robotarium(
         x_init,
         [mpc.x_min[0][0], mpc.x_max[0][0]],
@@ -129,7 +153,7 @@ if USE_ROBOTARIUM is True:
         [mpc.x_min[0][1], mpc.x_max[0][1]],
     )
 
-    # Initialize robotarium
+    # Initialize robotarium instance
     r = rb.Robotarium(
         number_of_robots=m,
         initial_conditions=x_init_robotarium,
