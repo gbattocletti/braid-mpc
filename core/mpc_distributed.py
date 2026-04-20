@@ -155,15 +155,17 @@ class DistributedMPC(MPC):
                     self.x_prev[k, : self.n_x_pos] - self.x_pred[j][k, : self.n_x_pos]
                 )
                 b_ij = (
-                    a_ij
-                    * (
-                        self.x_prev[k, : self.n_x_pos]
-                        + self.x_pred[j][k, : self.n_x_pos]
+                    ca.dot(
+                        a_ij,
+                        (
+                            self.x_prev[k, : self.n_x_pos]
+                            + self.x_pred[j][k, : self.n_x_pos]
+                        ),
                     )
                     / 2
                     + d / 2
                 )
-                self.ocp.subject_to(a_ij * self.x[k, : self.n_x_pos] >= b_ij)
+                self.ocp.subject_to(ca.dot(a_ij, self.x[k, : self.n_x_pos]) >= b_ij)
 
         # Cost function
         self.cost_function = 0
