@@ -9,7 +9,6 @@ class DistributedMPC(MPC):
 
     def __init__(self, dynamics: str = "single_integrator") -> None:
         super().__init__(dynamics=dynamics)
-        self.id: int = 0  # agent id (index in the list of agents), used for indexing
         self.architecture = "distributed"
         self.solver_options["print_level"] = 0
         self.solver_options["max_wall_time"] = 10.0  # [s]
@@ -23,6 +22,29 @@ class DistributedMPC(MPC):
         # representing the predicted trajectory of another agent over the prediction
         # horizon. The first element corresponds to the real state of that agent.
         self.x_pred: list[ca.Opti.parameter]  # m-1 arrays of shape (K, n_x)
+
+    def set_alpha_w(self, alpha_w: np.ndarray) -> None:
+        """
+        Set the winding cost weight.
+
+        Args:
+            alpha_w (np.ndarray): winding cost weight matrix of shape (m-1, ).
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: if alpha_w is a numpy array with incorrect shape
+            TypeError: if alpha_w is not a scalar or a numpy array
+        """
+        if not isinstance(alpha_w, np.ndarray):
+            raise TypeError("alpha_w must be a numpy array.")
+        if not alpha_w.shape == (self.m - 1,):
+            raise ValueError(
+                f"alpha_w must have shape ({self.m - 1}, ), "
+                f"but got {alpha_w.shape}."
+            )
+        self.ocp.set_value(self.alpha_w, alpha_w)
 
     def _initialize_ocp(self) -> None:
         """
@@ -43,7 +65,7 @@ class DistributedMPC(MPC):
         self.w_target = self.ocp.parameter(self.m - 1)  # current winding number (m-1, )
         self.x_pred = [self.ocp.parameter(self.K, self.n_x) for _ in range(self.m - 1)]
         self.alpha_g = self.ocp.parameter()  # scalar
-        self.alpha_w = self.ocp.parameter(self.m, self.m)
+        self.alpha_w = self.ocp.parameter(self.m - 1)  # winding weight (m-1, )
 
         # Constraints
         # Initial state constraint
@@ -127,7 +149,7 @@ class DistributedMPC(MPC):
         for j in range(self.m - 1):
 
             # Get weight for agent j
-            alpha_w_j: float = self.alpha_w[self.id, j]
+            alpha_w_j = self.alpha_w[j]
 
             # Compute winding number w.r.t. j at the end of prediction horizon
             w = self.w_curr[j]
@@ -199,9 +221,9 @@ class DistributedMPC(MPC):
                     f"{len(x_pred)}."
                 )
             for j, x_pred_j in enumerate(x_pred):
-                if x_pred_j.shape != (self.K + 1, self.n_x):
+                if x_pred_j.shape != (self.K, self.n_x):
                     raise ValueError(
-                        f"x_pred[{j}] must have shape ({self.K + 1}, {self.n_x}), "
+                        f"x_pred[{j}] must have shape ({self.K}, {self.n_x}), "
                         f"got {x_pred_j.shape} instead."
                     )
             x_pred = np.array(x_pred)  # convert to numpy array for ease of indexing
@@ -244,7 +266,7 @@ class DistributedMPC(MPC):
         sol = self.ocp.solve()
         return sol
 
-    def check_cost(self) -> tuple[float, float, float, float]:
+    def check_cost(self, **kwargs) -> tuple[float, float, float, float]:
         """
         Compute the cost function value for the current solution. This method is mainly
         intended for debugging and analysis purposes, as the cost value is already
@@ -254,7 +276,8 @@ class DistributedMPC(MPC):
             solution gets overwritten upon switching to the next agent. To
 
         Args:
-            None
+            idx (int, optional): index of the agent for which to compute the cost.
+                This is only used to show the agent idx in the output print statement.
 
         Returns:
             cost (float): value of the cost function for the current solution
@@ -266,6 +289,9 @@ class DistributedMPC(MPC):
             RuntimeError: if the OCP has not been solved yet (no solution available).
             ValueError: if the sum of the cost components does not match the total cost.
         """
+        # Parse kwargs
+        idx: int | None = kwargs.get("idx", None)
+
         # Check if OCP is initialized
         if self.sol is None:
             raise RuntimeError(
@@ -298,10 +324,11 @@ class DistributedMPC(MPC):
         for j in range(self.m - 1):
 
             # Get weight for agent j
-            alpha_w_j = self.ocp.value(self.alpha_w[self.id, j])
+            alpha_w_j = self.ocp.value(self.alpha_w[j])
 
             # Compute winding number w.r.t. j at the end of prediction horizon
             w: float = w_curr[j] if isinstance(w_curr, np.ndarray) else w_curr
+            w_target_j = w_target[j] if isinstance(w_target, np.ndarray) else w_target
             for k in range(1, self.K):
                 theta: float = np.atan2(
                     x_pred[j][k, 1] - x[k, 1],
@@ -314,16 +341,19 @@ class DistributedMPC(MPC):
                 w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
 
             # Cumulate winding costs
-            w_target_j = w_target[j] if isinstance(w_target, np.ndarray) else w_target
             winding_cost += alpha_w_j * (w_target_j - w) ** 2
 
         # Total cost
         cost = goal_cost + control_cost + winding_cost
 
         # Check if the sum of the cost components matches the total cost
-        if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-4):
+        if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-6):
+            if idx is not None:
+                print(f"Cost check failed for agent {idx}: ", end="")
+            else:
+                print("Cost check failed: ", end="")
             print(
-                f"Cost check failed: computed cost {cost:.4f} does not match "
+                f"computed cost {cost:.4f} does not match "
                 f"cost from solution {self.sol.value(self.cost_function):.4f} "
                 f"(error: {abs(cost - self.sol.value(self.cost_function)):.4e})."
             )

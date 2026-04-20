@@ -143,33 +143,24 @@ class MPC(ABC):
         """
         self.ocp.set_value(self.alpha_g, alpha_g)
 
-    def set_alpha_w(self, alpha_w: np.ndarray | float) -> None:
+    @abstractmethod
+    def set_alpha_w(self, alpha_w: np.ndarray) -> None:
         """
         Set the winding cost weight.
 
         Args:
-            alpha_w (np.ndarray | float): winding cost weight matrix of shape (m, m) or
-                a scalar (to use the same weight for all agent pairs)
+            alpha_w (np.ndarray): winding cost weight matrix.
 
         Returns:
             None
 
         Raises:
-            ValueError: if alpha_w is a numpy array with incorrect shape
-            TypeError: if alpha_w is not a scalar or a numpy array
+            NotImplementedError: if the method is not implemented in a subclass.
         """
-        if isinstance(alpha_w, np.ndarray) and alpha_w.shape == (self.m, self.m):
-            pass
-        elif isinstance(alpha_w, np.ndarray) and alpha_w.shape != (self.m, self.m):
-            raise ValueError(
-                f"alpha_w must have shape ({self.m}, {self.m}), "
-                f"but got {alpha_w.shape}."
-            )
-        elif isinstance(alpha_w, (int, float)):
-            alpha_w = alpha_w * np.ones((self.m, self.m))
-        else:
-            raise TypeError("alpha_w must be a scalar or a numpy array.")
-        self.ocp.set_value(self.alpha_w, alpha_w)
+        raise NotImplementedError(
+            "The set_alpha_w() method must be implemented in a subclass of MPC, since "
+            "the shape of alpha_w depends on the specific MPC architecture."
+        )
 
     def initialize_ocp(self) -> None:
         """

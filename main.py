@@ -1,9 +1,9 @@
 import os
 
-import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 import rps.robotarium as rb
+from matplotlib import patches
 
 from core import agent, mpc_centralized, mpc_distributed
 from utils import invariants, io, robotarium_bridge
@@ -13,7 +13,7 @@ from visualization import plot
 
 # User-defined settings
 DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
-CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
+CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
@@ -186,6 +186,10 @@ if USE_ROBOTARIUM is True:
 # Initialize time vector
 time: np.ndarray = np.arange(0, T + DT, DT)
 
+# Initialize cost weights
+alpha_g: float = ALPHA_G
+alpha_w: np.ndarray = ALPHA_W * (np.ones([m, m]) - np.eye(m))  # default constant
+
 # Initialize matrix to store traveled trajectories
 trajectories: np.ndarray = np.zeros((len(time), mpc.n_x, m))  # realized trajectories
 cost_mat: np.ndarray = np.zeros((len(time), 4, m))  # cost for each agent (4 terms)
@@ -213,14 +217,12 @@ for step, t in enumerate(time):
     w_target_resampled[step, :, :] = w_target  # save target WN for plotting
 
     # Update time varying weights
-    if step == 0 or USE_TIME_VARYING_WEIGHTS is True:
+    if USE_TIME_VARYING_WEIGHTS is True:
         alpha_g = ALPHA_G * (t / T) ** EXP_GOAL  # increase goal cost weight over time
         alpha_w = ALPHA_W * invariants.compute_winding_weights(
             np.array([M[i].x for i in range(m)]),
             d_threshold=None,
         )
-        mpc.set_alpha_g(alpha_g)  # NOTE: required at least once before solving the MPC
-        mpc.set_alpha_w(alpha_w)  # NOTE: required at least once before solving the MPC
 
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
@@ -233,9 +235,14 @@ for step, t in enumerate(time):
             else:
                 x_pred[1:, :, i] = M[i].x_opt[2:]
 
-        # Solve local MPC problem for each agent
+        # Solve control problem for each agent in parallel
         for i in range(m):
-            mpc.id = i
+
+            # Update dynamic weigths
+            mpc.set_alpha_g(alpha_g)  # same for all agents
+            mpc.set_alpha_w(np.delete(alpha_w[i], i, axis=0))  # local for each agent
+
+            # Solve local MPC problem
             (u_opt, x_opt, cost, t_sol) = mpc.solve(
                 x_0=M[i].x,
                 x_goal=M[i].x_goal,
@@ -268,6 +275,10 @@ for step, t in enumerate(time):
         # Collect initial states of all agents
         x_0 = [M[i].x for i in range(m)]
         x_0 = np.array(x_0).T  # reshape to m x n_x
+
+        # Update weights
+        mpc.set_alpha_g(alpha_g)
+        mpc.set_alpha_w(alpha_w)
 
         # Solve centralized MPC problem
         (u_opt, x_opt, cost, t_sol) = mpc.solve(

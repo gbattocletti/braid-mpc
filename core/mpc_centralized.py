@@ -31,6 +31,29 @@ class CentralizedMPC(MPC):
         self.solver_options["mu_strategy"] = "adaptive"
         self.solver_options["warm_start_init_point"] = "yes"
 
+    def set_alpha_w(self, alpha_w: np.ndarray) -> None:
+        """
+        Set the winding cost weight.
+
+        Args:
+            alpha_w (np.ndarray): winding cost weight matrix of shape (m, m).
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: if alpha_w is a numpy array with incorrect shape
+            TypeError: if alpha_w is not a scalar or a numpy array
+        """
+        if not isinstance(alpha_w, np.ndarray):
+            raise TypeError("alpha_w must be a numpy array.")
+        if not alpha_w.shape == (self.m, self.m):
+            raise ValueError(
+                f"alpha_w must have shape ({self.m}, {self.m}), "
+                f"but got {alpha_w.shape}."
+            )
+        self.ocp.set_value(self.alpha_w, alpha_w)
+
     def _initialize_ocp(self) -> None:
         """
         Initialize the centralized OCP problem for the centralized MPC architecture.
