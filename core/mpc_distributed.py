@@ -18,10 +18,13 @@ class DistributedMPC(MPC):
         # In the distributed MPC case, each agent's local OCP problem includes the
         # predicted trajectories (optimizers at the previous time step) of the other
         # agents, which are shared among the agents at each time step.
-        # x_pred is a list of length m-1, where each element is a (K, n_x) array
+        # x_pred is a list of length m-1, where each element is a (K+1, n_x) array
         # representing the predicted trajectory of another agent over the prediction
-        # horizon. The first element corresponds to the real state of that agent.
-        self.x_pred: list[ca.Opti.parameter]  # m-1 arrays of shape (K, n_x)
+        # horizon. The predicted trajectory of the ego agent itself is represented by
+        # the x_prev variable. In both x_pred and x_prev the last element is repeated
+        # twice to get the shape (K+1, n_x).
+        self.x_pred: list[ca.Opti.parameter]  # m-1 arrays of shape (K+1, n_x)
+        self.x_prev: ca.Opti.parameter  # optimizer of ego agent at previous time step
 
     def set_alpha_w(self, alpha_w: np.ndarray) -> None:
         """
@@ -63,7 +66,10 @@ class DistributedMPC(MPC):
         self.x_goal = self.ocp.parameter(1, self.n_x)
         self.w_curr = self.ocp.parameter(self.m - 1)  # current winding number (m-1, )
         self.w_target = self.ocp.parameter(self.m - 1)  # current winding number (m-1, )
-        self.x_pred = [self.ocp.parameter(self.K, self.n_x) for _ in range(self.m - 1)]
+        self.x_pred = [
+            self.ocp.parameter(self.K + 1, self.n_x) for _ in range(self.m - 1)
+        ]
+        self.x_prev = self.ocp.parameter(self.K + 1, self.n_x)  # ego prediction at k-1
         self.alpha_g = self.ocp.parameter()  # scalar
         self.alpha_w = self.ocp.parameter(self.m - 1)  # winding weight (m-1, )
 
@@ -115,16 +121,49 @@ class DistributedMPC(MPC):
                 self.ocp.subject_to(ca.norm_1(self.u[k, :]) <= self.u_tot_max)
 
         # Collision avoidance constraints
+        # NOTE: the collision avoidance constraints are cast as a sequence of convex
+        # constraints that enforce a minimum distance between the trajectory of the ego
+        # agent and the predicted trajectories of the other agents. In order to
+        # guarantee recursive feasibility, the linear constraint is based on the
+        # predicted trajectory of the ego agent at the previous time step, so that the
+        # constraint is the same for both agents i (ego) and j involved. In order to
+        # guarantee recursive feasibility, this constraint is aslo paired with a
+        # terminal constraint on the state x(N|k), which is trivial for a
+        # single-integrator and unicycle dynamics but must be accounted in general.
         # NOTE: the distance constraint is only computed w.r.t. other agents, and not
         # w.r.t. itself. Therefore only m-1 constraints are considered here.
-        # NOTE: a squared distance constraint is used to avoid numerical issues.
-        if self.d_min is not None:
-            for j in range(self.m - 1):
-                for k in range(self.K):
-                    dist = (self.x[k, 0] - self.x_pred[j][k, 0]) ** 2 + (
-                        self.x[k, 1] - self.x_pred[j][k, 1]
-                    ) ** 2
-                    self.ocp.subject_to(dist >= self.d_min**2)
+        # Start by computing the safety distance d (>= self.d_min)
+        d: float
+        if self.dynamics == "single_integrator":
+            if self.u_max is not None:
+                v_max = np.sqrt(self.u_max[0, 0] ** 2 + self.u_max[0, 1] ** 2)
+                d = np.sqrt(self.d_min**2 + (v_max * self.dt) ** 2)
+            else:
+                d = self.d_min
+        elif self.dynamics == "unicycle":
+            if self.u_max is not None:
+                d = self.d_min + self.u_max[0, 0] * self.dt
+            else:
+                d = self.d_min
+
+        # Compute the separating hyperplane between the predicted trajectories i and j
+        for j in range(self.m - 1):
+            for k in range(self.K + 1):
+                a_ij = (
+                    self.x_prev[k, : self.n_x_pos] - self.x_pred[j][k, : self.n_x_pos]
+                ) / ca.norm_2(
+                    self.x_prev[k, : self.n_x_pos] - self.x_pred[j][k, : self.n_x_pos]
+                )
+                b_ij = (
+                    a_ij
+                    * (
+                        self.x_prev[k, : self.n_x_pos]
+                        + self.x_pred[j][k, : self.n_x_pos]
+                    )
+                    / 2
+                    + d / 2
+                )
+                self.ocp.subject_to(a_ij * self.x[k, : self.n_x_pos] >= b_ij)
 
         # Cost function
         self.cost_function = 0
@@ -153,7 +192,7 @@ class DistributedMPC(MPC):
 
             # Compute winding number w.r.t. j at the end of prediction horizon
             w = self.w_curr[j]
-            for k in range(1, self.K):
+            for k in range(1, self.K + 1):
                 theta: ca.MX = ca.atan2(
                     self.x_pred[j][k, 1] - self.x[k, 1],
                     self.x_pred[j][k, 0] - self.x[k, 0],
@@ -188,6 +227,20 @@ class DistributedMPC(MPC):
     ) -> ca.OptiSol:
         """
         Solve the MPC problem for the distributed MPC architecture.
+
+        Kwargs:
+            x_pred (list[np.ndarray] | np.ndarray): predicted trajectories of the other
+                agents over the prediction horizon. This can be either a list of length
+                m-1, where each element is a (K+1, n_x) array representing the predicted
+                trajectory of another agent, or a single array of shape (K+1, n_x, m-1)
+                containing the predicted trajectories of all other agents.
+            x_prev (np.ndarray): predicted trajectory of the ego agent at the previous
+                time step, of shape (K+1, n_x).
+
+        Raises:
+            ValueError: if the required kwargs are not provided.
+            ValueError: if the input arrays have incorrect shapes or types.
+            TypeError: if the input arrays have incorrect types.
         """
         # Validate inputs
         if x_0.shape != (self.n_x,):
@@ -221,16 +274,16 @@ class DistributedMPC(MPC):
                     f"{len(x_pred)}."
                 )
             for j, x_pred_j in enumerate(x_pred):
-                if x_pred_j.shape != (self.K, self.n_x):
+                if x_pred_j.shape != (self.K + 1, self.n_x):
                     raise ValueError(
-                        f"x_pred[{j}] must have shape ({self.K}, {self.n_x}), "
+                        f"x_pred[{j}] must have shape ({self.K + 1}, {self.n_x}), "
                         f"got {x_pred_j.shape} instead."
                     )
             x_pred = np.array(x_pred)  # convert to numpy array for ease of indexing
         elif isinstance(x_pred, np.ndarray):
-            if x_pred.shape != (self.K, self.n_x, self.m - 1):
+            if x_pred.shape != (self.K + 1, self.n_x, self.m - 1):
                 raise ValueError(
-                    f"x_pred must have shape ({self.K}, {self.n_x}, {self.m - 1}), "
+                    f"x_pred must have shape ({self.K + 1}, {self.n_x}, {self.m - 1}), "
                     f"but got {x_pred.shape}."
                 )
         else:
@@ -238,12 +291,25 @@ class DistributedMPC(MPC):
                 f"x_pred must be either a list of numpy arrays or a single numpy "
                 f"array, got {type(x_pred)} instead."
             )
+        x_prev: np.ndarray = kwargs.get("x_prev", None)
+        if x_prev is None:
+            raise ValueError("x_prev must be provided as a kwarg parameter.")
+        elif not isinstance(x_prev, np.ndarray):
+            raise TypeError(
+                f"x_prev must be a numpy array, but got {type(x_prev)} instead."
+            )
+        elif x_prev.shape != (self.K + 1, self.n_x):
+            raise ValueError(
+                f"x_prev must have shape ({self.K + 1}, {self.n_x}), but got "
+                f"{x_prev.shape}."
+            )
 
         # Set parameters in OCP
         self.ocp.set_value(self.x_0, x_0)
         self.ocp.set_value(self.x_goal, x_goal)
         self.ocp.set_value(self.w_curr, w_curr)
         self.ocp.set_value(self.w_target, w_target)
+        self.ocp.set_value(self.x_prev, x_prev)
         for j in range(self.m - 1):
             self.ocp.set_value(self.x_pred[j], x_pred[:, :, j])
 
@@ -329,7 +395,7 @@ class DistributedMPC(MPC):
             # Compute winding number w.r.t. j at the end of prediction horizon
             w: float = w_curr[j] if isinstance(w_curr, np.ndarray) else w_curr
             w_target_j = w_target[j] if isinstance(w_target, np.ndarray) else w_target
-            for k in range(1, self.K):
+            for k in range(1, self.K + 1):
                 theta: float = np.atan2(
                     x_pred[j][k, 1] - x[k, 1],
                     x_pred[j][k, 0] - x[k, 0],

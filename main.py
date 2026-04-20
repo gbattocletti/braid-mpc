@@ -12,7 +12,7 @@ from visualization import plot
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
+DATA = "data/grids_m2_1.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
@@ -94,10 +94,8 @@ mpc.K = K
 mpc.m = m
 mpc.alpha_u = ALPHA_U  # constant (in general)
 mpc.d_min = 1
-# mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
-# mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
-mpc.x_min = np.array([-1000, -1000])
-mpc.x_max = np.array([1000, 1000])
+mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
+mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
 if USE_ROBOTARIUM is True:
     # NOTE: when using the robotarium, the linear velocity limit (1st element of the
     # u_min and u_max vectors) must be scaled to match the robotarium's velocity limits.
@@ -113,8 +111,9 @@ else:
     mpc.R = np.diag([1, 1])
 mpc.initialize_ocp()
 
-# Initialize helper variables (only for distributed MPC)
-x_pred = np.zeros([K, mpc.n_x, m]) if mpc.architecture == "distributed" else None
+# Initialize helper variables to store trajectory predictions (only for distributed MPC)
+x_pred = np.zeros([K + 1, mpc.n_x, m]) if mpc.architecture == "distributed" else None
+x_prev = np.zeros([K + 1, mpc.n_x]) if mpc.architecture == "distributed" else None
 
 ## Simulation setup ####################################################################
 if USE_ROBOTARIUM is True:
@@ -229,11 +228,11 @@ for step, t in enumerate(time):
 
         # Collect predicted trajectories of all agents
         for i in range(m):
-            x_pred[0:, :, i] = M[i].x
-            if M[i].x_opt is None:
-                x_pred[1:, :, i] = M[i].x  # use constant state as predicted trajectory
+            if M[i].x_opt is None:  # 1st time step
+                x_pred[:, :, i] = M[i].x  # use constant state as predicted trajectory
             else:
-                x_pred[1:, :, i] = M[i].x_opt[2:]
+                x_pred[:-1, :, i] = M[i].x_opt[1:]
+                x_pred[-1, :, i] = M[i].x_opt[-1]  # repeat last to match dimensions
 
         # Solve control problem for each agent in parallel
         for i in range(m):
@@ -246,11 +245,12 @@ for step, t in enumerate(time):
             (u_opt, x_opt, cost, t_sol) = mpc.solve(
                 x_0=M[i].x,
                 x_goal=M[i].x_goal,
-                w_curr=np.delete(w_curr[i], i, axis=0),  # remove self winding number
+                x_pred=np.delete(x_pred, i, axis=2),
+                x_prev=x_pred[:, :, i],
+                w_curr=np.delete(w_curr[i], i, axis=0),
                 w_target=np.delete(w_target[i], i, axis=0),
-                use_warm_start=True,
                 sol_prev=M[i].sol,
-                x_pred=np.delete(x_pred, i, axis=2),  # remove self predicted trajectory
+                use_warm_start=True,
             )
             M[i].sol = mpc.sol  # save solution in agent object
             M[i].u_opt = u_opt
@@ -389,10 +389,6 @@ for step, t in enumerate(time):
                 f"({M[i].cost_g:.2e}, {M[i].cost_u:.2e}, {M[i].cost_w:.2e})",
             )
 
-# Call robotarium termination function
-if USE_ROBOTARIUM is True:
-    r.call_at_scripts_end()
-
 ## Compute stats #######################################################################
 if DEBUG is True:
     t_sol_avg = np.mean(t_sol_mat, axis=0)
@@ -424,16 +420,32 @@ plot.plot_paths_3d(
 )
 
 # Plot cost over time
-if DEBUG is True:
-    plot.plot_cost(cost_mat, time, show=False)
+plot.plot_cost(cost_mat, time, show=False)
 
 # Plot realized winding numbers vs the target ones
-# NOTE: the commented lines provide an alternative way to compute the realized winding
-# numbers which can be used as a sanity check during debugging
-# windings: np.ndarray = invariants.paths2windings(trajectories[:, :2, :])
-# plot.plot_windings(windings, time, windings_ref=w_target_resampled, show=False)
 plot.plot_windings(w_curr_mat, time, windings_ref=w_target_resampled, show=False)
 
-# Show all plots
+# Show all plots (blocking)
 if SHOW_PLOTS is True:
-    plt.show()
+
+    def _close_all(_):
+        plt.close("all")
+
+    for num in plt.get_fignums():
+        fig = plt.figure(num)
+        fig.canvas.mpl_connect("close_event", _close_all)
+        fig.canvas.mpl_connect(
+            "key_press_event",
+            lambda e: _close_all(e) if e.key in ("q", "escape") else None,
+        )
+
+    print("\nScript terminated. Press 'q' or 'escape' to close all plots.")
+
+    plt.ioff()
+    plt.show(block=True)
+
+## Terminate script ####################################################################
+
+# Call robotarium termination function
+if USE_ROBOTARIUM is True:
+    r.call_at_scripts_end()
