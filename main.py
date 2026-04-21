@@ -12,23 +12,24 @@ from visualization import plot, plot_debug
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m10_2.yaml"  # initial and goal locations, topological specification
-CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
+DATA = "data/grids_m5_2.yaml"  # initial and goal locations, topological specification
+CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
+PROGRESS_STRATEGY = "winding_progress"  # "uniform_time" or "winding_progress"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
 DEBUG_HYPERPLANES = True  # whether to plot the hyperplanes and stop the simulation
 
 # Simulation and controller's properties
-DT: float = 0.5  # s
-K: int = 10  # time steps
-T: float = 30  # total simulation time (s)
+DT: float = 0.25  # s
+K: int = 20  # time steps
+T: float = 100  # total simulation time (s)
 
 # Cost function weights
 ALPHA_U: float = 0.001  # control cost (constant).
-ALPHA_G: float = 1  # scaling factor for goal tracking cost. 0 to disable goal tracking
-EXP_GOAL: int = 30  # exponent for time-varying goal cost weight
-ALPHA_W: float = 10  # scaling factor for winding cost. 0 to disable winding tracking
+ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
+EXP_GOAL: int = 20  # exponent for time-varying goal cost weight
+ALPHA_W: float = 100  # scaling factor for winding cost; use 0 to disable
 USE_TIME_VARYING_WEIGHTS: bool = True
 
 ## Preprocessing #######################################################################
@@ -42,6 +43,7 @@ os.chdir(dir_name)
 data = io.load_yaml(DATA)
 m = data["m"]
 grids = np.array(data["grids"])  # topological specification
+n_generators = grids.shape[0]  # number of generators in the specification
 x_init = np.array(data["x_init"]).T
 x_goal = np.array(data["x_goal"]).T
 
@@ -59,7 +61,7 @@ plot.plot_paths_3d(paths, normalize=True, show=False)
 windings_target = invariants.paths2windings(
     paths,
     upscale_factor=100,
-    intermediate_shape="spline",
+    intermediate_shape="linear",
 )  # (n_windings, m, m)
 n_windings = windings_target.shape[0]  # length of the winding number vector
 
@@ -115,6 +117,13 @@ mpc.initialize_ocp()
 # Initialize helper variables to store trajectory predictions (only for distributed MPC)
 x_pred = np.zeros([K + 1, mpc.n_x, m]) if mpc.architecture == "distributed" else None
 x_prev = np.zeros([K + 1, mpc.n_x]) if mpc.architecture == "distributed" else None
+
+# Initialize max progress speed variable
+if mpc.dynamics == "single_integrator":
+    v_max = np.linalg.norm(mpc.u_max)
+else:
+    v_max = mpc.u_max[0]
+delta_tau_max: float = 2 * n_generators * K / np.pi * np.arcsin(v_max * DT / mpc.d_min)
 
 ## Simulation setup ####################################################################
 
@@ -215,6 +224,7 @@ alpha_g: float = ALPHA_G
 alpha_w: np.ndarray = ALPHA_W * (np.ones([m, m]) - np.eye(m))  # default constant
 
 # Initialize matrix to store traveled trajectories
+tau: float = 0  # progress variable for winding-based progress
 trajectories: np.ndarray = np.zeros((len(time), mpc.n_x, m))  # realized trajectories
 cost_mat: np.ndarray = np.zeros((len(time), 4, m))  # cost for each agent (4 terms)
 theta: np.ndarray = np.zeros((m, m))  # relative headings between the agents
@@ -226,21 +236,34 @@ t_sol_mat: np.ndarray = np.zeros((len(time), m))  # solution time for each agent
 
 for step, t in enumerate(time):
 
-    # 1. Compute target winding numbers
-    # NOTE: in the current implementation the time progresses constantly along the braid
-    # TODO: tau_target should probably be computed based on the actual progress of the
-    # agents along the braid, rather than just time. This would avoid for the error to
-    # explode if the agents lag behind the prespecified time schedule. The value of
-    # tau (actual progress along the braid) can be estimated based on the current
-    # winding numbers compared with the target ones. Since different pairings i, j will
-    # likely progress at different rates, we can either let every pairing to have its
-    # own tau_target_ij, or compute a single tau_target based on the average progress
-    # across all pairings.
-    tau_target = min([(t + K * DT) / T, 1])  # cap target winding at end of braid
-    w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
+    # 1a. Compute target winding numbers
+    if PROGRESS_STRATEGY == "uniform_time":
+        tau_target = min([(t + K * DT) / T, 1])  # cap target winding at end of braid
+        w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
+    elif PROGRESS_STRATEGY == "winding_progress":
+        if mpc.architecture == "distributed":
+            tau_i = np.zeros(m)
+            w_target = np.zeros((m, m))
+            for i in range(m):
+                tau_i[i], w_target[i, :] = invariants.estimate_tau(
+                    agent_idx=i,
+                    w_measured=w_curr,
+                    w_reference=windings_target,
+                    tau_prev=tau,
+                    delta_tau_max=delta_tau_max,
+                    betas=None,
+                )
+            # TODO: alternative consensus strategies (min, ...)
+            tau = tau_i.mean()
+            w_target = w_target.mean(axis=0)
+        else:
+            raise NotImplementedError(
+                "Centralized estimation of tau is not implemented yet."
+            )
+            # tau, w_target = invariants.estimate_tau_centralized(w_curr, w_target, tau)
     w_target_resampled[step, :, :] = w_target  # save target WN for plotting
 
-    # Update time varying weights
+    # 1b. Update time varying weights
     if USE_TIME_VARYING_WEIGHTS is True:
         alpha_g = ALPHA_G * (t / T) ** EXP_GOAL  # increase goal cost weight over time
         alpha_w = ALPHA_W * invariants.compute_winding_weights(
@@ -295,8 +318,13 @@ for step, t in enumerate(time):
                 cost_mat[step, 3, i] = cost_w
                 t_sol_mat[step, i] = t_sol
 
-            # Plot hyperplanes (manual selection of timestep and agent index)
-            if DEBUG_HYPERPLANES and step == 100 and i == 0:
+            # Plot hyperplanes (requires manual selection of timestep and agent index)
+            if (
+                DEBUG_HYPERPLANES is True
+                and mpc.architecture == "distributed"
+                and step == 100
+                and i == 0
+            ):
                 plot_debug.plot_hyperplanes(
                     mpc,
                     figsize=np.array([20, 20]),

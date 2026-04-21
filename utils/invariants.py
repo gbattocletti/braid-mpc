@@ -311,3 +311,134 @@ def compute_winding_weights(
 
     # Return weights
     return weights
+
+
+def estimate_tau(
+    agent_idx: int | None,
+    w_measured: np.ndarray,
+    w_reference: np.ndarray,
+    tau_prev: float,
+    delta_tau_max: float,
+    betas: np.ndarray | None = None,
+    interpolate_intervals: bool = False,
+) -> tuple[float, np.ndarray]:
+    """
+    Locally estimate the progress variable tau given the real winding numbers.
+
+    Args:
+        agent_idx (int | None): index of the agent for which to estimate tau. If None,
+            the function will estimate tau for all agents in a centralized fashion.
+        w_measured (np.ndarray): current winding numbers of shape (m, m)
+        w_reference (np.ndarray): target winding numbers of shape (n_samples, m, m)
+        tau_prev (float): previous estimate of tau
+        delta_tau_max (float): maximum change in tau per time step
+        betas (np.ndarray | None): weights for the winding number cost term. If None,
+            all winding numbers are weighted equally. Default is None.
+        interpolate_intervals (bool): whether to interpolate the winding numbers
+            between the discrete samples in w_reference. If True, a linear interpolation
+            is used and the optimizer can be found in between discrete samples.
+            Recommended if w_reference is not very densely sampled and has no upscaling.
+            Default is False.
+
+    Returns:
+        float: estimated value of tau
+        w_tau: the winding numbers corresponding to the estimated tau, of shape (m,)
+
+    Raises:
+        ValueError: if the shapes of 'windings_meas' and 'windings_target' are not
+            compatible.
+        ValueError: if 'betas' is provided and has negative values.
+    """
+    # Parse inputs
+    if w_reference.ndim != 3 or w_reference.shape[1] != w_reference.shape[2]:
+        raise ValueError("'windings_target' must have shape (N, m, m).")
+    n_samples, m, _ = w_reference.shape
+    if w_measured.shape != (m, m):
+        raise ValueError("'windings_meas' must have shape (m, m).")
+    if betas is not None:
+        if not isinstance(betas, np.ndarray):
+            raise ValueError("'betas' must be a numpy array.")
+        if betas.shape != (m, m):
+            raise ValueError(f"'betas' must have shape ({m}, {m}).")
+        if np.any(betas < 0):
+            raise ValueError("All 'betas' must be nonnegative.")
+    if not 0.0 <= tau_prev <= 1.0:
+        raise ValueError("'tau_prev' must be in [0, 1].")
+    if delta_tau_max <= 0:
+        raise ValueError("'delta_tau_max' must be positive.")
+
+    # Slice out the agent's row and drop the j == i self-entry
+    other_agents = np.arange(m) != agent_idx  # boolean mask of shape (m,)
+    w_measured = w_measured[other_agents]  # (m - 1,)
+    w_reference = w_reference[:, agent_idx, other_agents]  # (n_samples, m - 1)
+
+    # Compute the weights
+    if betas is None:
+        weights = np.ones(m - 1)
+    else:
+        weights = np.asarray(betas, float)[other_agents]  # (m - 1,)
+
+    # Compute the interval [tau_prev, tau_prev+delta_tau_max] in which to search
+    tau_low = tau_prev
+    tau_high = min(tau_prev + delta_tau_max, 1.0)
+    tau_step = 1.0 / (n_samples - 1)
+
+    # Find the indexes of all the intervals [tau_n, tau_{n+1}] that overlap the window
+    # [tau_low, tau_high]. These are all the intervals on which we will optimize.
+    idx_low = max(int(np.floor(tau_low * (n_samples - 1))), 0)
+    idx_high = min(int(np.ceil(tau_high * (n_samples - 1))), n_samples - 1)
+    idx_left = np.arange(idx_low, idx_high)  # left indexes of all the intervals
+    tau_left = idx_left * tau_step  # left endpoints of all the intervals (in [0, 1])
+
+    if interpolate_intervals is False:
+        # Optimize at discrete samples via weighted squared cost at each candidate
+        # sample (with samples corresponding to elements in w_reference).
+        residuals = w_reference[idx_left] - w_measured  # (n_candidates, n_agents - 1)
+        costs = (weights * residuals * residuals).sum(axis=1)  # (n_candidates,)
+        best = int(np.argmin(costs))
+    else:
+        # Optimize over each sub-interval
+        # Intervals are defined as tau_left < tau < tau_right = tau_left + tau_step. We
+        # assume that winding numbers are linearly interpolated over
+        # [tau_left, tau_right], resulting in the linearly interpolated reference:
+        #     w_ref(tau) = w_ref(tau(k)) + (tau - tau(k)) / tau_step * tau_slope,
+        # where tau_slope = w_ref(tau(k+1)) - w_ref(tau(k)), with tau(k) = tau_left and
+        # tau(k+1) = tau_right. The residual over this interval is then
+        #     residual(u) = residual_left + u * tau_slope
+        # with u in [0, 1] and residual_left = w_ref(tau_left) - w_meas.
+        # The weighted squared cost
+        #     L(u) = sum_j weights_j * residual_j(u)^2
+        # can be rewritten as a quadratic cost in u,
+        #     cost(u) = cost_linear * 2u + cost_quadratic * u^2,
+        # with coefficients
+        #     cost_quadratic = sum_j weights_j * slope_j^2           (>= 0)
+        #     cost_linear    = sum_j weights_j * residual_at_left_j * slope_j,
+        # whose unconstrained minimizer is u_unconst = -cost_linear / cost_quadratic.
+        residual_left = w_reference[idx_left] - w_measured  # (n_subs, m - 1)
+        slope = w_reference[idx_left + 1] - w_reference[idx_left]  # (n_subs, m - 1)
+        cost_quadratic = (weights * slope * slope).sum(axis=1)  # (n_subs,)
+        cost_linear = (weights * residual_left * slope).sum(axis=1)  # (n_subs,)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            u_unconstrained = np.where(
+                cost_quadratic > 0, -cost_linear / cost_quadratic, 0.0
+            )
+
+        # Project onto the feasible set:
+        # - first clamp to subinterval [0, 1] and project back to [tau_left, tau_right]
+        # - then clamp the resulting taus to the overall window [tau_low, tau_high]
+        # - finally revert again to the u parameterization to compute the costs
+        tau_candidate = tau_left + np.clip(u_unconstrained, 0.0, 1.0) * tau_step
+        tau_candidate = np.clip(tau_candidate, tau_low, tau_high)
+        u_candidate = (tau_candidate - tau_left) / tau_step
+
+        # Compute cost of each subinterval's candidate, then pick the global lowest
+        residuals = residual_left + u_candidate[:, None] * slope  # (n_subs, m - 1)
+        cost = (weights * residuals * residuals).sum(axis=1)  # (n_subs,)
+        best = int(np.argmin(cost))
+
+    # The reference row at tau_new is residual[best] + w_measured, so no
+    # extra interpolation is needed.
+    tau_new = float(tau_candidate[best])
+    w_target = np.zeros(m)
+    w_target[other_agents] = residuals[best] + w_measured
+    return tau_new, w_target
