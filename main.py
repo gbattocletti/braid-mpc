@@ -7,19 +7,20 @@ from matplotlib import patches
 
 from core import agent, mpc_centralized, mpc_distributed
 from utils import geometry, invariants, io, robotarium_bridge
-from visualization import plot
+from visualization import plot, plot_debug
 
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
+DATA = "data/grids_m10_2.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
+DEBUG_HYPERPLANES = True  # whether to plot the hyperplanes and stop the simulation
 
 # Simulation and controller's properties
-DT: float = 0.1  # s
+DT: float = 0.5  # s
 K: int = 10  # time steps
 T: float = 30  # total simulation time (s)
 
@@ -293,6 +294,17 @@ for step, t in enumerate(time):
                 cost_mat[step, 2, i] = cost_u
                 cost_mat[step, 3, i] = cost_w
                 t_sol_mat[step, i] = t_sol
+
+            # Plot hyperplanes (manual selection of timestep and agent index)
+            if DEBUG_HYPERPLANES and step == 100 and i == 0:
+                plot_debug.plot_hyperplanes(
+                    mpc,
+                    figsize=np.array([20, 20]),
+                    show_solution=True,
+                    show_legend=True,
+                    show=True,
+                    block=False,
+                )
 
     # Centralized MPC controller
     elif mpc.architecture == "centralized":
