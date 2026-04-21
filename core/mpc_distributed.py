@@ -142,7 +142,7 @@ class DistributedMPC(MPC):
                 d = self.d_min
         elif self.dynamics == "unicycle":
             if self.u_max is not None:
-                d = self.d_min + self.u_max[0, 0] * self.dt
+                d = np.sqrt(self.d_min**2 + self.u_max[0, 0] * self.dt**2)
             else:
                 d = self.d_min
 
