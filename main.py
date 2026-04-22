@@ -24,9 +24,9 @@ DEBUG_HYPERPLANES = False  # whether to plot the hyperplanes and stop the simula
 # - uniform_time --> uniform progression over time
 # - winding_progress --> estimate progression from actual trajectories
 # In case of distributed control, an additional selection can be made to determine the
-#  selection of tau from individual estimates. Can be either "mean" or "min".
+#  selection of tau from individual estimates. Can be "mean", "min", or "median".
 PROGRESS_STRATEGY = "winding_progress"
-PROGRESS_STRATEGY_DISTRIBUTED = "min"
+PROGRESS_STRATEGY_DISTRIBUTED = "median"
 
 # Simulation and controller's properties
 DT: float = 0.1  # s
@@ -298,9 +298,11 @@ for step, t in enumerate(time):
                     weights=alpha_w,
                 )
             if PROGRESS_STRATEGY_DISTRIBUTED == "min":
-                tau = tau_i.min()
+                tau = np.min(tau_i)
             elif PROGRESS_STRATEGY_DISTRIBUTED == "mean":
-                tau = tau_i.mean()
+                tau = np.mean(tau_i)
+            elif PROGRESS_STRATEGY_DISTRIBUTED == "median":
+                tau = np.median(tau_i)
             else:
                 raise ValueError(
                     f"Invalid distributed progress strategy: "
