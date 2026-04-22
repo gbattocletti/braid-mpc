@@ -82,6 +82,8 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         normalize (bool, optional): Whether to normalize the paths to fit within a
             mxm square. This option is recommended when plotting a sequence of
             permutation grids. Default is False.
+        time (bool, optional): a 1D array of shape (n,) representing the time steps
+            corresponding to the paths.
         x_lims (np.ndarray, optional): The limits for the x-axis. Default is (-1, m).
         y_lims (np.ndarray, optional): The limits for the y-axis. Default is (-1, m).
         figsize (tuple[float, float], optional): The size of the figure in cm.
@@ -102,6 +104,7 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     """
     # Parse kwargs
     normalize: bool = kwargs.get("normalize", False)
+    time: np.ndarray | None = kwargs.get("time", None)
     x_lims: np.ndarray = kwargs.get("x_lims", (-1, paths.shape[2]))
     y_lims: np.ndarray = kwargs.get("y_lims", (-1, paths.shape[2]))
     figsize: np.ndarray = kwargs.get("figsize", np.array([10, 10]))
@@ -125,7 +128,8 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
 
     # Preprocess
     n, _, m = paths.shape  # Extract dimensions
-    time = np.arange(n)  # Create time array for z-axis
+    if time is None:
+        time = np.arange(n)  # Create time array for z-axis
     colors = plt.color_sequences["tab10"][:m]  # Define colormaps
 
     # Normalize space to mxm square for consistent visualization
@@ -145,7 +149,7 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     # Set limits and aspect
     ax.set_xlim(x_lims)
     ax.set_ylim(y_lims)
-    ax.set_zlim(0, n - 1)
+    ax.set_zlim(0, time[-1])
     ax.set_box_aspect([1, 1, 1.7])  # ax.set_aspect("equalxy")
     ax.view_init(elev=pov[0], azim=pov[1], roll=pov[2])
     ax.set_xlabel("x")

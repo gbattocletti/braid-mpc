@@ -523,6 +523,7 @@ if DEBUG is True:
 # Plot realized trajectories in space-time domain
 plot.plot_paths_3d(
     trajectories[:, :2, :],
+    time=time,
     x_lims=np.array(data["x_lims"]),
     y_lims=np.array(data["y_lims"]),
     normalize=False,
