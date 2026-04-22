@@ -128,14 +128,22 @@ x_prev = np.zeros([K + 1, mpc.n_x]) if mpc.architecture == "distributed" else No
 
 # Initialize max progress speed variable
 if PROGRESS_STRATEGY == "winding_progress":
-    progress_coefficient = 1  # in [0,1], to slow progress if delta_tau_max is too big
     if mpc.dynamics == "single_integrator":
         v_max = np.linalg.norm(mpc.u_max)
     else:
         v_max = mpc.u_max[0]
-    delta_tau_max: float = progress_coefficient * (
-        2 * K / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
-    )  # max delta_tau over one MPC horizon
+    delta_tau: float = 2 / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
+    delta_tau_max = 0.005  # cap delta_tau to avoid going too fast
+    if delta_tau > delta_tau_max:
+        delta_tau = delta_tau_max
+        print(
+            f"{CmdColors.WARNING}[WARNING]{CmdColors.ENDC} computed delta_tau "
+            f"({delta_tau:.4f}) is larger than delta_tau_max ({delta_tau_max:.4f}). "
+            f"Capping delta_tau to delta_tau_max to obtain a smoother progression "
+            "along the braid."
+        )
+    delta_tau_K: float = K * delta_tau  # max delta_tau over one MPC horizon
+
 
 ## Simulation setup ####################################################################
 
@@ -286,7 +294,7 @@ for step, t in enumerate(time):
                     w_measured=w_curr,
                     w_reference=windings_target,
                     tau_prev=tau,
-                    delta_tau_max=delta_tau_max,
+                    delta_tau_max=delta_tau_K,
                     weights=alpha_w,
                 )
             if PROGRESS_STRATEGY_DISTRIBUTED == "min":
@@ -305,13 +313,13 @@ for step, t in enumerate(time):
                 w_measured=w_curr,
                 w_reference=windings_target,
                 tau_prev=tau,
-                delta_tau_max=delta_tau_max,
+                delta_tau_max=delta_tau_K,
                 weights=alpha_w,
             )
 
         # Find tau_target from tau and compute corresponding w_target
         tau_mat[step] = tau  # save tau for plotting
-        tau_target = min(tau + delta_tau_max, 1)  # cap target winding at end of braid
+        tau_target = min(tau + delta_tau_K, 1)  # cap target winding at end of braid
         w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
     else:
         raise ValueError(f"Invalid progress strategy: {PROGRESS_STRATEGY}")
