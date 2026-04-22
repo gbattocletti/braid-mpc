@@ -374,10 +374,9 @@ def estimate_tau(
             weights = np.ones((m, m))
     else:
         # Distributed case
-
         # Slice out the agent's row and drop the j == i self-entry
         other_agents = np.arange(m) != agent_idx  # boolean mask of shape (m,)
-        w_measured = w_measured[other_agents]  # (m - 1,)
+        w_measured = w_measured[agent_idx, other_agents]  # (m - 1,)
         w_reference = w_reference[:, agent_idx, :][
             :, other_agents
         ]  # (n_samples, m - 1)
@@ -386,7 +385,7 @@ def estimate_tau(
         if weights is None:
             weights = np.ones(m - 1)
         else:
-            weights = np.asarray(weights, float)[other_agents]  # (m - 1,)
+            weights = weights[agent_idx, other_agents]  # (m - 1,)
 
     # Compute the interval [tau_prev, tau_prev+delta_tau_max] in which to search
     tau_low = tau_prev
@@ -402,9 +401,9 @@ def estimate_tau(
     idx_left = np.arange(idx_low, idx_high + 1)  # left indexes of all the intervals
     tau_left = idx_left * tau_step  # left endpoints of all the intervals (in [0, 1])
 
+    # Non-interpolation case - optimize at discrete samples via weighted squared
     if interpolate_intervals is False:
 
-        # Non-interpolation case - optimize at discrete samples via weighted squared
         # cost at each candidate sample (element in w_reference).
         residuals = w_reference[idx_left] - w_measured
         if agent_idx is not None:
@@ -419,9 +418,14 @@ def estimate_tau(
         best = int(np.argmin(costs))
         tau = tau_left[best]
 
+    # Interpolation case - optimize over each sub-interval
     elif interpolate_intervals is True and agent_idx is not None:
 
-        # Interpolation case - optimize over each sub-interval
+        # Check indexes (may be redundant -- to be checked)
+        if idx_high == n_samples - 1:
+            idx_high -= 1
+            idx_left = np.arange(idx_low, idx_high + 1)
+
         # Intervals are defined as tau_left < tau < tau_right = tau_left + tau_step. We
         # assume that winding numbers are linearly interpolated over
         # [tau_left, tau_right], resulting in the linearly interpolated reference:
