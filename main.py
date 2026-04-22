@@ -17,7 +17,7 @@ CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
-DEBUG_HYPERPLANES = True  # whether to plot the hyperplanes and stop the simulation
+DEBUG_HYPERPLANES = False  # whether to plot the hyperplanes and stop the simulation
 
 # Select progress strategy along the specification
 # Available approaches are:
@@ -29,7 +29,7 @@ PROGRESS_STRATEGY = "winding_progress"
 PROGRESS_STRATEGY_DISTRIBUTED = "min"
 
 # Simulation and controller's properties
-DT: float = 0.25  # s
+DT: float = 0.1  # s
 K: int = 20  # time steps
 T: float = 100  # total simulation time (s)
 
@@ -37,7 +37,7 @@ T: float = 100  # total simulation time (s)
 ALPHA_U: float = 0.001  # control cost (constant).
 ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
 EXP_GOAL: int = 20  # exponent for time-varying goal cost weight
-ALPHA_W: float = 100  # scaling factor for winding cost; use 0 to disable
+ALPHA_W: float = 1e3  # scaling factor for winding cost; use 0 to disable
 USE_TIME_VARYING_WEIGHTS: bool = True
 
 ## Preprocessing #######################################################################
@@ -104,7 +104,7 @@ mpc.dt = DT
 mpc.K = K
 mpc.m = m
 mpc.alpha_u = ALPHA_U  # constant (in general)
-mpc.d_min = 1
+mpc.d_min = 2
 mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
 if USE_ROBOTARIUM is True:
@@ -127,11 +127,15 @@ x_pred = np.zeros([K + 1, mpc.n_x, m]) if mpc.architecture == "distributed" else
 x_prev = np.zeros([K + 1, mpc.n_x]) if mpc.architecture == "distributed" else None
 
 # Initialize max progress speed variable
-if mpc.dynamics == "single_integrator":
-    v_max = np.linalg.norm(mpc.u_max)
-else:
-    v_max = mpc.u_max[0]
-delta_tau_max: float = 2 * n_generators * K / np.pi * np.arcsin(v_max * DT / mpc.d_min)
+if PROGRESS_STRATEGY == "winding_progress":
+    progress_coefficient = 1  # in [0,1], to slow progress if delta_tau_max is too big
+    if mpc.dynamics == "single_integrator":
+        v_max = np.linalg.norm(mpc.u_max)
+    else:
+        v_max = mpc.u_max[0]
+    delta_tau_max: float = progress_coefficient * (
+        2 * K / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
+    )  # max delta_tau over one MPC horizon
 
 ## Simulation setup ####################################################################
 
@@ -231,25 +235,39 @@ time: np.ndarray = np.arange(0, T + DT, DT)
 alpha_g: float = ALPHA_G
 alpha_w: np.ndarray = ALPHA_W * (np.ones([m, m]) - np.eye(m))  # default constant
 
-# Initialize matrix to store traveled trajectories
-tau: float = 0  # progress variable for winding-based progress
-if mpc.architecture == "distributed":
-    tau_i: np.ndarray = np.zeros(m)  # local estimates of progress variable tau
-    w_target_i: np.ndarray = np.zeros((m, m))
-trajectories: np.ndarray = np.zeros((len(time), mpc.n_x, m))  # realized trajectories
-cost_mat: np.ndarray = np.zeros((len(time), 4, m))  # cost for each agent (4 terms)
+# Initialize winding number helper variables
 theta: np.ndarray = np.zeros((m, m))  # relative headings between the agents
 theta_prev: np.ndarray = invariants.relative_headings(x_init)  # prev relative headings
 w_curr: np.ndarray = np.zeros((m, m))  # current winding numbers between the agents
+
+# Initialize progress variables
+tau: float = 0  # progress variable for winding-based progress
+tau_mat: np.ndarray = np.zeros(len(time))  # to save tau over time for plotting
+tau_i: np.ndarray = np.zeros(m) if mpc.architecture == "distributed" else None
+tau_i_mat: np.ndarray = (
+    np.zeros((len(time), m)) if mpc.architecture == "distributed" else None
+)  # to save tau_i over time for plotting
+
+# Initialize matrices to store simulation data
+trajectories: np.ndarray = np.zeros((len(time), mpc.n_x, m))  # realized trajectories
+cost_mat: np.ndarray = np.zeros((len(time), 4, m))  # cost for each agent (4 terms)
 w_curr_mat: np.ndarray = np.zeros((len(time), m, m))  # save current WN for plotting
 w_target_resampled: np.ndarray = np.zeros((len(time), m, m))  # resampled for plotting
 t_sol_mat: np.ndarray = np.zeros((len(time), m))  # solution time for each agent
 
+# Run simulation loop
 for step, t in enumerate(time):
 
     # 1a. Update time varying weights
     if USE_TIME_VARYING_WEIGHTS is True:
-        alpha_g = ALPHA_G * (t / T) ** EXP_GOAL  # increase goal cost weight over time
+        if PROGRESS_STRATEGY == "uniform_time":
+            alpha_g = (
+                ALPHA_G * (t / T) ** EXP_GOAL
+            )  # increase goal cost weight over time
+        elif PROGRESS_STRATEGY == "winding_progress":
+            alpha_g = (
+                ALPHA_G * (tau / 1.0) ** EXP_GOAL
+            )  # increase goal cost weight over braid progress
         alpha_w = ALPHA_W * invariants.compute_winding_weights(
             np.array([M[i].x for i in range(m)]),
             d_threshold=None,
@@ -260,9 +278,10 @@ for step, t in enumerate(time):
         tau_target = min([(t + K * DT) / T, 1])  # cap target winding at end of braid
         w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
     elif PROGRESS_STRATEGY == "winding_progress":
+        # Compute tau (progress variable) from current winding numbers
         if mpc.architecture == "distributed":
             for i in range(m):
-                tau_i[i], w_target_i[i, :] = invariants.estimate_tau(
+                tau_i[i], _ = invariants.estimate_tau(
                     agent_idx=i,
                     w_measured=w_curr,
                     w_reference=windings_target,
@@ -272,17 +291,16 @@ for step, t in enumerate(time):
                 )
             if PROGRESS_STRATEGY_DISTRIBUTED == "min":
                 tau = tau_i.min()
-                w_target = w_target_i[np.argmin(tau_i), :]
             elif PROGRESS_STRATEGY_DISTRIBUTED == "mean":
                 tau = tau_i.mean()
-                w_target = w_target_i.mean(axis=0)
             else:
                 raise ValueError(
                     f"Invalid distributed progress strategy: "
                     f"{PROGRESS_STRATEGY_DISTRIBUTED}"
                 )
-        else:
-            tau, w_target = invariants.estimate_tau(
+            tau_i_mat[step, :] = tau_i  # save individual tau_i for plotting
+        else:  # centralized case
+            tau, _ = invariants.estimate_tau(
                 agent_idx=None,
                 w_measured=w_curr,
                 w_reference=windings_target,
@@ -290,6 +308,11 @@ for step, t in enumerate(time):
                 delta_tau_max=delta_tau_max,
                 weights=alpha_w,
             )
+
+        # Find tau_target from tau and compute corresponding w_target
+        tau_mat[step] = tau  # save tau for plotting
+        tau_target = min(tau + delta_tau_max, 1)  # cap target winding at end of braid
+        w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
     else:
         raise ValueError(f"Invalid progress strategy: {PROGRESS_STRATEGY}")
     w_target_resampled[step, :, :] = w_target  # save target WN for plotting
@@ -510,7 +533,12 @@ plot.plot_paths_3d(
 plot.plot_cost(cost_mat, time, show=False)
 
 # Plot realized winding numbers vs the target ones
+plot.plot_windings(windings_target, range(windings_target.shape[0]), show=False)
 plot.plot_windings(w_curr_mat, time, windings_ref=w_target_resampled, show=False)
+if PROGRESS_STRATEGY == "winding_progress" and mpc.architecture == "distributed":
+    plot.plot_tau(tau_mat, time, tau_i=tau_i_mat, show=False)
+elif PROGRESS_STRATEGY == "winding_progress" and mpc.architecture == "centralized":
+    plot.plot_tau(tau_mat, time, show=False)
 
 # Show all plots (blocking)
 if SHOW_PLOTS is True:

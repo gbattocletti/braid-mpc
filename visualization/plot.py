@@ -378,3 +378,70 @@ def plot_cost(
         plt.show()
 
     return fig, axes
+
+
+def plot_tau(
+    tau: np.ndarray, time: np.ndarray, tau_i: np.ndarray | None = None, **kwargs
+) -> tuple[plt.Figure, plt.Axes]:
+    """
+    Plot the progress variable tau over time.
+
+    Args:
+        tau (np.ndarray): A 1D array of shape (n,) representing the progress variable
+            tau at each time step.
+        time (np.ndarray): A 1D array of shape (n,) representing the time steps
+            corresponding to the tau values.
+        tau_i (np.ndarray | None, optional): A 2D array of shape (n, m) representing
+            the individual progress variables tau_i for each agent at each time step.
+            If provided, these will be plotted as dashed lines. Default is None.
+        figsize (tuple[float, float], optional): The size of the figure in cm.
+        show_legend (bool, optional): Whether to show legend for the plot. Default is
+            False.
+        show (bool, optional): Whether to display the plot. Default is False.
+
+    Returns:
+        tuple[plt.Figure, plt.Axes]: The figure and axes objects for the plot.
+    """
+    # Parse kwargs
+    figsize: np.ndarray = kwargs.get("figsize", np.array([10, 10]))
+    show_legend: bool = kwargs.get("show_legend", False)
+    show: bool = kwargs.get("show", False)
+
+    # Extract dimensions
+    m = tau_i.shape[1] if tau_i is not None else 0
+
+    # Define colormaps
+    colors = plt.color_sequences["tab10"][:m]
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=figsize / 2.54)
+    ax.plot(time, tau, linewidth=1.5, color="black", label="tau", zorder=5)
+    if tau_i is not None:
+        for i in range(m):
+            ax.plot(
+                time,
+                tau_i[:, i],
+                linewidth=1.2,
+                color=colors[i],
+                linestyle="--",
+                label=f"tau_{i}",
+                zorder=4,
+            )
+
+    # Set labels and title
+    ax.set_xlim(time.min() - 1, time.max() + 1)
+    ax.set_ylim(-0.1, 1.1)  # tau is always between 0 and 1
+    ax.grid(True, which="major", linestyle=":", color="gray", linewidth=0.5, zorder=1)
+    ax.grid(True, which="minor", linestyle=":", color="gray", linewidth=0.3, zorder=1)
+    ax.minorticks_on()
+    ax.set_title("Progress variable tau", fontsize=10)
+    ax.set_xlabel("t")
+    ax.set_ylabel("tau")
+
+    if show_legend:
+        ax.legend()
+
+    if show:
+        plt.show()
+
+    return fig, ax
