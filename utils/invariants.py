@@ -332,7 +332,7 @@ def estimate_tau(
         w_reference (np.ndarray): target winding numbers of shape (n_samples, m, m)
         tau_prev (float): previous estimate of tau
         delta_tau_max (float): maximum change in tau per time step
-        betas (np.ndarray | None): weights for the winding number cost term. If None,
+        weights (np.ndarray | None): weights for the winding number cost term. If None,
             all winding numbers are weighted equally. Default is None.
         interpolate_intervals (bool): whether to interpolate the winding numbers
             between the discrete samples in w_reference. If True, a linear interpolation
@@ -355,11 +355,11 @@ def estimate_tau(
         raise ValueError("'windings_meas' must have shape (m, m).")
     if weights is not None:
         if not isinstance(weights, np.ndarray):
-            raise ValueError("'betas' must be a numpy array.")
+            raise ValueError("'weights' must be a numpy array.")
         if weights.shape != (m, m):
-            raise ValueError(f"'betas' must have shape ({m}, {m}).")
+            raise ValueError(f"'weights' must have shape ({m}, {m}).")
         if np.any(weights < 0):
-            raise ValueError("All 'betas' must be nonnegative.")
+            raise ValueError("All 'weights' must be nonnegative.")
     if not 0.0 <= tau_prev <= 1.0:
         raise ValueError("'tau_prev' must be in [0, 1].")
     if delta_tau_max <= 0:
@@ -368,16 +368,19 @@ def estimate_tau(
     # Select the reference data depending on the estimation mode:
     # - distributed -> consider only the ego agent's row, shape (n_samples, n_agents)
     # - centralized -> consider the full matrices, shape (n_samples, n_agents, n_agents)
-    if agent_idx is None and weights is None:
+    if agent_idx is None:
         # Centralized case
-        weights = np.ones(m, m)
+        if weights is None:
+            weights = np.ones((m, m))
     else:
         # Distributed case
 
         # Slice out the agent's row and drop the j == i self-entry
         other_agents = np.arange(m) != agent_idx  # boolean mask of shape (m,)
         w_measured = w_measured[other_agents]  # (m - 1,)
-        w_reference = w_reference[:, agent_idx, other_agents]  # (n_samples, m - 1)
+        w_reference = w_reference[:, agent_idx, :][
+            :, other_agents
+        ]  # (n_samples, m - 1)
 
         # Compute the weights
         if weights is None:
@@ -392,26 +395,33 @@ def estimate_tau(
 
     # Find the indexes of all the intervals [tau_n, tau_{n+1}] that overlap the window
     # [tau_low, tau_high]. These are all the intervals on which we will optimize.
-    idx_low = max(int(np.floor(tau_low * (n_samples - 1))), 0)
-    idx_high = min(int(np.ceil(tau_high * (n_samples - 1))), n_samples - 1)
-    idx_left = np.arange(idx_low, idx_high)  # left indexes of all the intervals
+    idx_low = int(np.ceil(tau_low * (n_samples - 1)))
+    idx_high = int(np.floor(tau_high * (n_samples - 1)))
+    if idx_high < idx_low:
+        idx_low = idx_high = int(np.round(tau_low * (n_samples - 1)))
+    idx_left = np.arange(idx_low, idx_high + 1)  # left indexes of all the intervals
     tau_left = idx_left * tau_step  # left endpoints of all the intervals (in [0, 1])
 
     if interpolate_intervals is False:
-        # Optimize at discrete samples via weighted squared cost at each candidate
-        # sample (with samples corresponding to elements in w_reference).
+
+        # Non-interpolation case - optimize at discrete samples via weighted squared
+        # cost at each candidate sample (element in w_reference).
         residuals = w_reference[idx_left] - w_measured
         if agent_idx is not None:
             # Distributed case: residuals and weights have shape (n_samples, m - 1)
             costs = (weights * residuals * residuals).sum(axis=1)
-            best = int(np.argmin(costs))
         else:
             # Centralized case: residuals and weights have shape (n_samples, m, m)
             sum_axes = tuple(range(1, residuals.ndim))
             costs = (weights * residuals * residuals).sum(axis=sum_axes)
-            best = int(np.argmin(costs))
+
+        # Extract solution for non-interpolating case
+        best = int(np.argmin(costs))
+        tau = tau_left[best]
+
     elif interpolate_intervals is True and agent_idx is not None:
-        # Optimize over each sub-interval
+
+        # Interpolation case - optimize over each sub-interval
         # Intervals are defined as tau_left < tau < tau_right = tau_left + tau_step. We
         # assume that winding numbers are linearly interpolated over
         # [tau_left, tau_right], resulting in the linearly interpolated reference:
@@ -449,15 +459,19 @@ def estimate_tau(
         residuals = residual_left + u_candidate[:, None] * slope  # (n_subs, m - 1)
         cost = (weights * residuals * residuals).sum(axis=1)  # (n_subs,)
         best = int(np.argmin(cost))
+        tau = float(tau_candidate[best])
     else:
         raise NotImplementedError(
             "Interpolation of tau intervals is currently not implemented for "
             "centralized estimation of tau."
         )
 
-    # The reference row at tau_new is residual[best] + w_measured, so no
-    # extra interpolation is needed.
-    tau_new = float(tau_candidate[best])
-    w_tau = np.zeros(m)
-    w_tau[other_agents] = residuals[best] + w_measured
-    return tau_new, w_tau
+    # Compute w_tau corresponding to estimated tau
+    if agent_idx is None:
+        w_tau = residuals[best] + w_measured  # (m, m) for centralized case
+    else:
+        w_tau = np.zeros(m)  # (m, ) for distributed case
+        w_tau[other_agents] = residuals[best] + w_measured
+
+    # Return estimated tau and corresponding w_tau
+    return tau, w_tau
