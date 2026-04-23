@@ -73,11 +73,10 @@ class MPC(ABC):
         self.w_target: ca.Opti.parameter  # target winding number w.r.t. agents
 
         # Cost function weights and matrices
-        self.alpha_u: float | None = None  # control input cost weight
-        self.alpha_g: float | None = None  # goal tracking cost weight
-        self.alpha_g_progress: float | None = None  # weight for progress toward goal
-        self.alpha_w: np.ndarray | float | None = None  # winding cost weight
-        self.R: np.ndarray | None = None  # control input cost matrix
+        self.alpha_g: ca.Opti.parameter  # goal tracking cost weight (time varying)
+        self.alpha_u: float  # control input cost weight (constant)
+        self.R: np.ndarray  # control input cost matrix (constant)
+        self.alpha_w: ca.Opti.parameter  # winding cost weight (time varying)
 
         # Constraints
         self.u_min: np.ndarray | None = None
@@ -132,6 +131,37 @@ class MPC(ABC):
                 the range (-pi, pi].
         """
         return ca.atan2(ca.sin(angle_1 - angle_2), ca.cos(angle_1 - angle_2))
+
+    def set_alpha_g(self, alpha_g: float) -> None:
+        """
+        Set the goal tracking cost weight.
+
+        Args:
+            alpha_g (float): goal tracking cost weight
+
+        Returns:
+            None
+        """
+        self.ocp.set_value(self.alpha_g, alpha_g)
+
+    @abstractmethod
+    def set_alpha_w(self, alpha_w: np.ndarray) -> None:
+        """
+        Set the winding cost weight.
+
+        Args:
+            alpha_w (np.ndarray): winding cost weight matrix.
+
+        Returns:
+            None
+
+        Raises:
+            NotImplementedError: if the method is not implemented in a subclass.
+        """
+        raise NotImplementedError(
+            "The set_alpha_w() method must be implemented in a subclass of MPC, since "
+            "the shape of alpha_w depends on the specific MPC architecture."
+        )
 
     def initialize_ocp(self) -> None:
         """
@@ -315,7 +345,7 @@ class MPC(ABC):
         )
 
     @abstractmethod
-    def check_cost(self) -> float:
+    def check_cost(self) -> tuple[float, float, float, float]:
         """
         Compute the cost function value for the current solution. This is a helper
         method intended for debugging and testing.

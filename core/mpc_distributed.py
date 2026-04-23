@@ -18,10 +18,36 @@ class DistributedMPC(MPC):
         # In the distributed MPC case, each agent's local OCP problem includes the
         # predicted trajectories (optimizers at the previous time step) of the other
         # agents, which are shared among the agents at each time step.
-        # x_pred is a list of length m-1, where each element is a (K, n_x) array
+        # x_pred is a list of length m-1, where each element is a (K+1, n_x) array
         # representing the predicted trajectory of another agent over the prediction
-        # horizon. The first element corresponds to the real state of that agent.
-        self.x_pred: list[ca.Opti.parameter]  # m-1 arrays of shape (K, n_x)
+        # horizon. The predicted trajectory of the ego agent itself is represented by
+        # the x_prev variable. In both x_pred and x_prev the last element is repeated
+        # twice to get the shape (K+1, n_x).
+        self.x_pred: list[ca.Opti.parameter]  # m-1 arrays of shape (K+1, n_x)
+        self.x_prev: ca.Opti.parameter  # optimizer of ego agent at previous time step
+
+    def set_alpha_w(self, alpha_w: np.ndarray) -> None:
+        """
+        Set the winding cost weight.
+
+        Args:
+            alpha_w (np.ndarray): winding cost weight matrix of shape (m-1, ).
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: if alpha_w is a numpy array with incorrect shape
+            TypeError: if alpha_w is not a scalar or a numpy array
+        """
+        if not isinstance(alpha_w, np.ndarray):
+            raise TypeError("alpha_w must be a numpy array.")
+        if not alpha_w.shape == (self.m - 1,):
+            raise ValueError(
+                f"alpha_w must have shape ({self.m - 1}, ), "
+                f"but got {alpha_w.shape}."
+            )
+        self.ocp.set_value(self.alpha_w, alpha_w)
 
     def _initialize_ocp(self) -> None:
         """
@@ -40,7 +66,12 @@ class DistributedMPC(MPC):
         self.x_goal = self.ocp.parameter(1, self.n_x)
         self.w_curr = self.ocp.parameter(self.m - 1)  # current winding number (m-1, )
         self.w_target = self.ocp.parameter(self.m - 1)  # current winding number (m-1, )
-        self.x_pred = [self.ocp.parameter(self.K, self.n_x) for _ in range(self.m - 1)]
+        self.x_pred = [
+            self.ocp.parameter(self.K + 1, self.n_x) for _ in range(self.m - 1)
+        ]
+        self.x_prev = self.ocp.parameter(self.K + 1, self.n_x)  # ego prediction at k-1
+        self.alpha_g = self.ocp.parameter()  # scalar
+        self.alpha_w = self.ocp.parameter(self.m - 1)  # winding weight (m-1, )
 
         # Constraints
         # Initial state constraint
@@ -90,65 +121,92 @@ class DistributedMPC(MPC):
                 self.ocp.subject_to(ca.norm_1(self.u[k, :]) <= self.u_tot_max)
 
         # Collision avoidance constraints
+        # NOTE: the collision avoidance constraints are cast as a sequence of convex
+        # constraints that enforce a minimum distance between the trajectory of the ego
+        # agent and the predicted trajectories of the other agents. In order to
+        # guarantee recursive feasibility, the linear constraint is based on the
+        # predicted trajectory of the ego agent at the previous time step, so that the
+        # constraint is the same for both agents i (ego) and j involved. In order to
+        # guarantee recursive feasibility, this constraint is aslo paired with a
+        # terminal constraint on the state x(N|k), which is trivial for a
+        # single-integrator and unicycle dynamics but must be accounted in general.
         # NOTE: the distance constraint is only computed w.r.t. other agents, and not
         # w.r.t. itself. Therefore only m-1 constraints are considered here.
-        # NOTE: a squared distance constraint is used to avoid numerical issues.
-        if self.d_min is not None:
-            for j in range(self.m - 1):
-                for k in range(self.K):
-                    dist = (self.x[k, 0] - self.x_pred[j][k, 0]) ** 2 + (
-                        self.x[k, 1] - self.x_pred[j][k, 1]
-                    ) ** 2
-                    self.ocp.subject_to(dist >= self.d_min**2)
+        # Start by computing the safety distance d (>= self.d_min)
+        d: float
+        if self.dynamics == "single_integrator":
+            if self.u_max is not None:
+                v_max = np.sqrt(self.u_max[0, 0] ** 2 + self.u_max[0, 1] ** 2)
+                d = np.sqrt(self.d_min**2 + (v_max * self.dt) ** 2)
+            else:
+                d = self.d_min
+        elif self.dynamics == "unicycle":
+            if self.u_max is not None:
+                d = np.sqrt(self.d_min**2 + self.u_max[0, 0] * self.dt**2)
+            else:
+                d = self.d_min
+
+        # Compute the separating hyperplane between the predicted trajectories i and j
+        for j in range(self.m - 1):
+            for k in range(self.K + 1):
+                a_ij = (
+                    self.x_prev[k, : self.n_x_pos] - self.x_pred[j][k, : self.n_x_pos]
+                ) / ca.norm_2(
+                    self.x_prev[k, : self.n_x_pos] - self.x_pred[j][k, : self.n_x_pos]
+                )
+                b_ij = (
+                    ca.dot(
+                        a_ij,
+                        (
+                            self.x_prev[k, : self.n_x_pos]
+                            + self.x_pred[j][k, : self.n_x_pos]
+                        ),
+                    )
+                    / 2
+                    + d / 2
+                )
+                self.ocp.subject_to(ca.dot(a_ij, self.x[k, : self.n_x_pos]) >= b_ij)
 
         # Cost function
         self.cost_function = 0
 
         # Goal tracking cost (terminal cost)
-        if self.alpha_g is not None and self.alpha_g > 0:
-            for k in range(1, self.K + 1):
-                self.cost_function += self.alpha_g * (
-                    (self.x[k, 0] - self.x_goal[0]) ** 2
-                    + (self.x[k, 1] - self.x_goal[1]) ** 2
-                )
+        for k in range(1, self.K + 1):
+            self.cost_function += self.alpha_g * (
+                (self.x[k, 0] - self.x_goal[0]) ** 2
+                + (self.x[k, 1] - self.x_goal[1]) ** 2
+            )
 
         # Control input cost
-        if self.alpha_u is not None and self.alpha_u > 0:
-            for k in range(self.K):
-                self.cost_function += self.alpha_u * (
-                    self.u[k, :] @ self.R @ self.u[k, :].T
-                )
+        for k in range(self.K):
+            self.cost_function += self.alpha_u * (
+                self.u[k, :] @ self.R @ self.u[k, :].T
+            )
 
         # Winding cost
         # NOTE: the winding cost is only computed w.r.t. other agents, and not w.r.t.
         # itself, since the winding number w.r.t. itself is always 0. Therefore only m-1
         # terms are summed in the winding cost.
-        if self.alpha_w is not None and np.any(self.alpha_w > 0):
-            for j in range(self.m - 1):
+        for j in range(self.m - 1):
 
-                # Get weight for agent j
-                alpha_w_j: float
-                if isinstance(self.alpha_w, np.ndarray):
-                    self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
-                    alpha_w_j = self.alpha_w[j]
-                else:
-                    alpha_w_j = self.alpha_w
+            # Get weight for agent j
+            alpha_w_j = self.alpha_w[j]
 
-                # Compute winding number w.r.t. j at the end of prediction horizon
-                w = self.w_curr[j]
-                for k in range(1, self.K):
-                    theta: ca.SX | ca.MX = ca.atan2(
-                        self.x_pred[j][k, 1] - self.x[k, 1],
-                        self.x_pred[j][k, 0] - self.x[k, 0],
-                    )
-                    theta_prev: ca.SX | ca.MX = ca.atan2(
-                        self.x_pred[j][k - 1, 1] - self.x[k - 1, 1],
-                        self.x_pred[j][k - 1, 0] - self.x[k - 1, 0],
-                    )
-                    w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
+            # Compute winding number w.r.t. j at the end of prediction horizon
+            w = self.w_curr[j]
+            for k in range(1, self.K + 1):
+                theta: ca.MX = ca.atan2(
+                    self.x_pred[j][k, 1] - self.x[k, 1],
+                    self.x_pred[j][k, 0] - self.x[k, 0],
+                )
+                theta_prev: ca.MX = ca.atan2(
+                    self.x_pred[j][k - 1, 1] - self.x[k - 1, 1],
+                    self.x_pred[j][k - 1, 0] - self.x[k - 1, 0],
+                )
+                w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
-                # Add winding cost to the total cost function
-                self.cost_function += alpha_w_j * (self.w_target[j] - w) ** 2
+            # Add winding cost to the total cost function
+            self.cost_function += alpha_w_j * (self.w_target[j] - w) ** 2
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
@@ -171,6 +229,20 @@ class DistributedMPC(MPC):
     ) -> ca.OptiSol:
         """
         Solve the MPC problem for the distributed MPC architecture.
+
+        Kwargs:
+            x_pred (list[np.ndarray] | np.ndarray): predicted trajectories of the other
+                agents over the prediction horizon. This can be either a list of length
+                m-1, where each element is a (K+1, n_x) array representing the predicted
+                trajectory of another agent, or a single array of shape (K+1, n_x, m-1)
+                containing the predicted trajectories of all other agents.
+            x_prev (np.ndarray): predicted trajectory of the ego agent at the previous
+                time step, of shape (K+1, n_x).
+
+        Raises:
+            ValueError: if the required kwargs are not provided.
+            ValueError: if the input arrays have incorrect shapes or types.
+            TypeError: if the input arrays have incorrect types.
         """
         # Validate inputs
         if x_0.shape != (self.n_x,):
@@ -211,9 +283,9 @@ class DistributedMPC(MPC):
                     )
             x_pred = np.array(x_pred)  # convert to numpy array for ease of indexing
         elif isinstance(x_pred, np.ndarray):
-            if x_pred.shape != (self.K, self.n_x, self.m - 1):
+            if x_pred.shape != (self.K + 1, self.n_x, self.m - 1):
                 raise ValueError(
-                    f"x_pred must have shape ({self.K}, {self.n_x}, {self.m - 1}), "
+                    f"x_pred must have shape ({self.K + 1}, {self.n_x}, {self.m - 1}), "
                     f"but got {x_pred.shape}."
                 )
         else:
@@ -221,12 +293,25 @@ class DistributedMPC(MPC):
                 f"x_pred must be either a list of numpy arrays or a single numpy "
                 f"array, got {type(x_pred)} instead."
             )
+        x_prev: np.ndarray = kwargs.get("x_prev", None)
+        if x_prev is None:
+            raise ValueError("x_prev must be provided as a kwarg parameter.")
+        elif not isinstance(x_prev, np.ndarray):
+            raise TypeError(
+                f"x_prev must be a numpy array, but got {type(x_prev)} instead."
+            )
+        elif x_prev.shape != (self.K + 1, self.n_x):
+            raise ValueError(
+                f"x_prev must have shape ({self.K + 1}, {self.n_x}), but got "
+                f"{x_prev.shape}."
+            )
 
         # Set parameters in OCP
         self.ocp.set_value(self.x_0, x_0)
         self.ocp.set_value(self.x_goal, x_goal)
         self.ocp.set_value(self.w_curr, w_curr)
         self.ocp.set_value(self.w_target, w_target)
+        self.ocp.set_value(self.x_prev, x_prev)
         for j in range(self.m - 1):
             self.ocp.set_value(self.x_pred[j], x_pred[:, :, j])
 
@@ -249,7 +334,7 @@ class DistributedMPC(MPC):
         sol = self.ocp.solve()
         return sol
 
-    def check_cost(self) -> tuple[float, float, float, float]:
+    def check_cost(self, **kwargs) -> tuple[float, float, float, float]:
         """
         Compute the cost function value for the current solution. This method is mainly
         intended for debugging and analysis purposes, as the cost value is already
@@ -259,7 +344,8 @@ class DistributedMPC(MPC):
             solution gets overwritten upon switching to the next agent. To
 
         Args:
-            None
+            idx (int, optional): index of the agent for which to compute the cost.
+                This is only used to show the agent idx in the output print statement.
 
         Returns:
             cost (float): value of the cost function for the current solution
@@ -271,6 +357,9 @@ class DistributedMPC(MPC):
             RuntimeError: if the OCP has not been solved yet (no solution available).
             ValueError: if the sum of the cost components does not match the total cost.
         """
+        # Parse kwargs
+        idx: int | None = kwargs.get("idx", None)
+
         # Check if OCP is initialized
         if self.sol is None:
             raise RuntimeError(
@@ -288,62 +377,51 @@ class DistributedMPC(MPC):
 
         # Goal tracking cost
         goal_cost = 0
-        if self.alpha_g is not None and self.alpha_g > 0:
-            for k in range(1, self.K + 1):
-                goal_cost += self.alpha_g * (
-                    (x[k, 0] - x_goal[0]) ** 2 + (x[k, 1] - x_goal[1]) ** 2
-                )
-
-        # Goal progress cost
-        if self.alpha_g_progress is not None and self.alpha_g_progress > 0:
-            goal_cost += self.alpha_g_progress * (
-                (x[self.K, 0] - x_goal[0]) ** 2 + (x[self.K, 1] - x_goal[1]) ** 2
-            ) - ((x[0, 0] - x_goal[0]) ** 2 + (x[0, 1] - x_goal[1]) ** 2)
+        for k in range(1, self.K + 1):
+            goal_cost += self.ocp.value(self.alpha_g) * (
+                (x[k, 0] - x_goal[0]) ** 2 + (x[k, 1] - x_goal[1]) ** 2
+            )
 
         # Control input cost
         control_cost = 0
-        if self.alpha_u is not None and self.alpha_u > 0:
-            for k in range(self.K):
-                control_cost += self.alpha_u * (u[k, :] @ self.R @ u[k, :].T)
+        for k in range(self.K):
+            control_cost += self.alpha_u * (u[k, :] @ self.R @ u[k, :].T)
 
         # Winding cost
         winding_cost = 0
-        if self.alpha_w is not None and np.any(self.alpha_w > 0):
-            for j in range(self.m - 1):
+        for j in range(self.m - 1):
 
-                # Get weight for agent j
-                if isinstance(self.alpha_w, np.ndarray):
-                    self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
-                    alpha_w_j = self.alpha_w[j]
-                else:
-                    alpha_w_j = self.alpha_w
+            # Get weight for agent j
+            alpha_w_j = self.ocp.value(self.alpha_w[j])
 
-                # Compute winding number w.r.t. j at the end of prediction horizon
-                w: float = w_curr[j] if isinstance(w_curr, np.ndarray) else w_curr
-                for k in range(1, self.K):
-                    theta: float = np.atan2(
-                        x_pred[j][k, 1] - x[k, 1],
-                        x_pred[j][k, 0] - x[k, 0],
-                    )
-                    theta_prev: float = np.atan2(
-                        x_pred[j][k - 1, 1] - x[k - 1, 1],
-                        x_pred[j][k - 1, 0] - x[k - 1, 0],
-                    )
-                    w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
-
-                # Cumulate winding costs
-                w_target_j = (
-                    w_target[j] if isinstance(w_target, np.ndarray) else w_target
+            # Compute winding number w.r.t. j at the end of prediction horizon
+            w: float = w_curr[j] if isinstance(w_curr, np.ndarray) else w_curr
+            w_target_j = w_target[j] if isinstance(w_target, np.ndarray) else w_target
+            for k in range(1, self.K + 1):
+                theta: float = np.atan2(
+                    x_pred[j][k, 1] - x[k, 1],
+                    x_pred[j][k, 0] - x[k, 0],
                 )
-                winding_cost += alpha_w_j * (w_target_j - w) ** 2
+                theta_prev: float = np.atan2(
+                    x_pred[j][k - 1, 1] - x[k - 1, 1],
+                    x_pred[j][k - 1, 0] - x[k - 1, 0],
+                )
+                w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
+
+            # Cumulate winding costs
+            winding_cost += alpha_w_j * (w_target_j - w) ** 2
 
         # Total cost
         cost = goal_cost + control_cost + winding_cost
 
         # Check if the sum of the cost components matches the total cost
-        if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-4):
+        if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-6):
+            if idx is not None:
+                print(f"Cost check failed for agent {idx}: ", end="")
+            else:
+                print("Cost check failed: ", end="")
             print(
-                f"Cost check failed: computed cost {cost:.4f} does not match "
+                f"computed cost {cost:.4f} does not match "
                 f"cost from solution {self.sol.value(self.cost_function):.4f} "
                 f"(error: {abs(cost - self.sol.value(self.cost_function)):.4e})."
             )

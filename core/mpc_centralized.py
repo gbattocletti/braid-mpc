@@ -4,6 +4,7 @@ import casadi as ca
 import numpy as np
 
 from core.mpc import MPC
+from utils import invariants
 
 
 class CentralizedMPC(MPC):
@@ -27,6 +28,31 @@ class CentralizedMPC(MPC):
         self.solver_options["max_iter"] = 10_000
         self.solver_options["max_wall_time"] = 60.0  # [s]
         self.solver_options["max_cpu_time"] = 60.0  # [s]
+        self.solver_options["mu_strategy"] = "adaptive"
+        self.solver_options["warm_start_init_point"] = "yes"
+
+    def set_alpha_w(self, alpha_w: np.ndarray) -> None:
+        """
+        Set the winding cost weight.
+
+        Args:
+            alpha_w (np.ndarray): winding cost weight matrix of shape (m, m).
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: if alpha_w is a numpy array with incorrect shape
+            TypeError: if alpha_w is not a scalar or a numpy array
+        """
+        if not isinstance(alpha_w, np.ndarray):
+            raise TypeError("alpha_w must be a numpy array.")
+        if not alpha_w.shape == (self.m, self.m):
+            raise ValueError(
+                f"alpha_w must have shape ({self.m}, {self.m}), "
+                f"but got {alpha_w.shape}."
+            )
+        self.ocp.set_value(self.alpha_w, alpha_w)
 
     def _initialize_ocp(self) -> None:
         """
@@ -41,6 +67,8 @@ class CentralizedMPC(MPC):
         self.x_goal = self.ocp.parameter(self.n_x, self.m)
         self.w_curr = self.ocp.parameter(self.m, self.m)
         self.w_target = self.ocp.parameter(self.m, self.m)
+        self.alpha_g = self.ocp.parameter()  # scalar
+        self.alpha_w = self.ocp.parameter(self.m, self.m)
 
         # Constraints
         # Initial state constraint
@@ -130,61 +158,44 @@ class CentralizedMPC(MPC):
         self.cost_function = 0
 
         # Goal tracking cost
-        if self.alpha_g is not None and self.alpha_g > 0:
-            for i in range(self.m):
-                for k in range(1, self.K + 1):
-                    self.cost_function += self.alpha_g * (
-                        (self.x[i][k, 0] - self.x_goal[0, i]) ** 2
-                        + (self.x[i][k, 1] - self.x_goal[1, i]) ** 2
-                    )
+        for i in range(self.m):
+            for k in range(1, self.K + 1):
+                self.cost_function += self.alpha_g * (
+                    (self.x[i][k, 0] - self.x_goal[0, i]) ** 2
+                    + (self.x[i][k, 1] - self.x_goal[1, i]) ** 2
+                )
 
         # Control input cost
-        if self.alpha_u is not None and self.alpha_u > 0:
-            for i in range(self.m):
-                for k in range(self.K):
-                    self.cost_function += self.alpha_u * (
-                        self.u[i][k, :] @ self.R @ self.u[i][k, :].T
-                    )
+        for i in range(self.m):
+            for k in range(self.K):
+                self.cost_function += self.alpha_u * (
+                    self.u[i][k, :] @ self.R @ self.u[i][k, :].T
+                )
 
         # Winding cost
-        if self.alpha_w is not None and np.any(self.alpha_w > 0):
-            for i in range(self.m):
-                for j in range(self.m):
-                    if i == j:
-                        continue  # skip self-winding
+        for i in range(self.m):
+            for j in range(self.m):
+                if i == j:
+                    continue  # skip self-winding
 
-                    # Get weight for agent i w.r.t. agent j
-                    alpha_w_ij: float = self.alpha_w
-                    # if isinstance(self.alpha_w, np.ndarray):
-                    #     self.alpha_w: np.ndarray  # to avoid unsubscriptable-object
-                    #     alpha_w_ij = self.alpha_w[i, j]
-                    # else:
-                    #     alpha_w_ij = self.alpha_w
+                # Get weight for agent i w.r.t. agent j
+                alpha_w_ij: float = self.alpha_w[i, j]
 
-                    # Compute winding number w.r.t. j at the end of prediction horizon
-                    w = self.w_curr[i, j]
-                    for k in range(1, self.K + 1):
-                        # theta: ca.SX | ca.MX = ca.atan2(
-                        #     self.x[j][k, 1] - self.x[i][k, 1],
-                        #     self.x[j][k, 0] - self.x[i][k, 0],
-                        # )
-                        # theta_prev: ca.SX | ca.MX = ca.atan2(
-                        #     self.x[j][k - 1, 1] - self.x[i][k - 1, 1],
-                        #     self.x[j][k - 1, 0] - self.x[i][k - 1, 0],
-                        # )
-                        # w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
-                        dx = self.x[j][k, 0] - self.x[i][k, 0]
-                        dy = self.x[j][k, 1] - self.x[i][k, 1]
-                        dx_prev = self.x[j][k - 1, 0] - self.x[i][k - 1, 0]
-                        dy_prev = self.x[j][k - 1, 1] - self.x[i][k - 1, 1]
-                        delta_theta = ca.atan2(
-                            dy * dx_prev - dx * dy_prev,
-                            dx * dx_prev + dy * dy_prev + 1e-6,  # avoid division by 0
-                        )
-                        w += 1 / (2 * np.pi) * delta_theta
+                # Compute winding number w.r.t. j at the end of prediction horizon
+                w = self.w_curr[i, j]
+                for k in range(1, self.K + 1):
+                    theta: ca.SX | ca.MX = ca.atan2(
+                        self.x[j][k, 1] - self.x[i][k, 1],
+                        self.x[j][k, 0] - self.x[i][k, 0],
+                    )
+                    theta_prev: ca.SX | ca.MX = ca.atan2(
+                        self.x[j][k - 1, 1] - self.x[i][k - 1, 1],
+                        self.x[j][k - 1, 0] - self.x[i][k - 1, 0],
+                    )
+                    w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
-                    # Add winding cost to the total cost function
-                    self.cost_function += alpha_w_ij * (self.w_target[i, j] - w) ** 2
+                # Add winding cost to the total cost function
+                self.cost_function += alpha_w_ij * (self.w_target[i, j] - w) ** 2
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
@@ -268,7 +279,7 @@ class CentralizedMPC(MPC):
                 "Maximum_CpuTime_Exceeded",
                 "Maximum_Iterations_Exceeded",
             ]:
-                sol = self.ocp.debug  # try using the best solution found so far
+                sol = self.ocp.debug  # FIXME solution attributes must be assigned
             else:
                 g_val = self.ocp.debug.value(self.ocp.g)
                 lb_g = np.array(self.ocp.debug.value(self.ocp.lbg)).flatten()
@@ -326,46 +337,43 @@ class CentralizedMPC(MPC):
 
         # Goal tracking cost
         goal_cost = 0
-        if self.alpha_g is not None and self.alpha_g > 0:
-            for i in range(self.m):
-                for k in range(1, self.K + 1):
-                    goal_cost += self.alpha_g * (
-                        (x[k, 0] - x_goal[i, 0]) ** 2 + (x[k, 1] - x_goal[i, 1]) ** 2
-                    )
+        for i in range(self.m):
+            for k in range(1, self.K + 1):
+                goal_cost += self.ocp.value(self.alpha_g) * (
+                    (x[i][k, 0] - x_goal[0, i]) ** 2 + (x[i][k, 1] - x_goal[1, i]) ** 2
+                )
 
         # Control input cost
         control_cost = 0
-        if self.alpha_u is not None and self.alpha_u > 0:
-            for i in range(self.m):
-                for k in range(self.K):
-                    control_cost += self.alpha_u * (u[i][k, :] @ self.R @ u[i][k, :].T)
+        for i in range(self.m):
+            for k in range(self.K):
+                control_cost += self.alpha_u * (u[i][k, :] @ self.R @ u[i][k, :].T)
 
         # Winding cost
         winding_cost = 0
-        if self.alpha_w is not None and np.any(self.alpha_w > 0):
-            for i in range(self.m):
-                for j in range(self.m):
-                    if i == j:
-                        continue  # skip self-winding
+        for i in range(self.m):
+            for j in range(self.m):
+                if i == j:
+                    continue  # skip self-winding
 
-                    # Compute winding number of i w.r.t. j at end of prediction horizon
-                    w = w_curr[i, j]
-                    for k in range(1, self.K + 1):
-                        theta = np.arctan2(
-                            x[j][k, 1] - x[i][k, 1],
-                            x[j][k, 0] - x[i][k, 0],
-                        )
-                        theta_prev = np.arctan2(
-                            x[j][k - 1, 1] - x[i][k - 1, 1],
-                            x[j][k - 1, 0] - x[i][k - 1, 0],
-                        )
-                        delta_theta = np.arctan2(
-                            np.sin(theta - theta_prev),
-                            np.cos(theta - theta_prev),
-                        )
-                        w += 1 / (2 * np.pi) * delta_theta
+                # Get weight for agent i w.r.t. agent j
+                alpha_w_ij = self.ocp.value(self.alpha_w[i, j])
 
-                    winding_cost += self.alpha_w * (w_target[i, j] - w) ** 2
+                # Compute winding number of i w.r.t. j at end of prediction horizon
+                w = w_curr[i, j]
+                for k in range(1, self.K + 1):
+                    theta = np.arctan2(
+                        x[j][k, 1] - x[i][k, 1],
+                        x[j][k, 0] - x[i][k, 0],
+                    )
+                    theta_prev = np.arctan2(
+                        x[j][k - 1, 1] - x[i][k - 1, 1],
+                        x[j][k - 1, 0] - x[i][k - 1, 0],
+                    )
+                    delta_theta = invariants.angle_diff(theta, theta_prev)
+                    w += 1 / (2 * np.pi) * delta_theta
+
+                winding_cost += alpha_w_ij * (w_target[i, j] - w) ** 2
 
         # Total cost
         cost = goal_cost + control_cost + winding_cost

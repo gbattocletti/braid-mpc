@@ -15,14 +15,17 @@ def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         paths (np.ndarray): A 3D array of shape (n, 2, m) representing n time steps of
             m agents' positions in 2D space. Each entry paths[t, :, i] gives the
             (x, y) coordinates of agent i at time step t.
+        show_legend (bool, optional): Whether to show legend for the plot. Default is
+            False.
         show (bool, optional): Whether to display the plot. Default is False.
 
     Returns:
         tuple[plt.Figure, plt.Axes]: The figure and axes objects for the plot.
     """
     # Parse kwargs
-    show = kwargs.get("show", False)
     figsize = kwargs.get("figsize", np.array([10, 10]))
+    show_legend = kwargs.get("show_legend", False)
+    show = kwargs.get("show", False)
 
     # Validate inputs
     if not isinstance(paths, np.ndarray):
@@ -58,8 +61,9 @@ def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_title("2D Paths of Agents")
-    ax.legend()
     ax.grid(True)
+    if show_legend is True:
+        ax.legend()
 
     if show is True:
         plt.show()
@@ -78,12 +82,16 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         normalize (bool, optional): Whether to normalize the paths to fit within a
             mxm square. This option is recommended when plotting a sequence of
             permutation grids. Default is False.
+        time (bool, optional): a 1D array of shape (n,) representing the time steps
+            corresponding to the paths.
         x_lims (np.ndarray, optional): The limits for the x-axis. Default is (-1, m).
         y_lims (np.ndarray, optional): The limits for the y-axis. Default is (-1, m).
         figsize (tuple[float, float], optional): The size of the figure in cm.
             Default is (10, 10).
         pov (list[float], optional): A list of three floats representing the elevation,
             azimuth, and roll angles for the 3D plot's point of view.
+        show_legend (bool, optional): Whether to show legend for the plot. Default is
+            False.
         show (bool, optional): Whether to display the plot. Default is False.
 
     Returns:
@@ -96,10 +104,12 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     """
     # Parse kwargs
     normalize: bool = kwargs.get("normalize", False)
+    time: np.ndarray | None = kwargs.get("time", None)
     x_lims: np.ndarray = kwargs.get("x_lims", (-1, paths.shape[2]))
     y_lims: np.ndarray = kwargs.get("y_lims", (-1, paths.shape[2]))
     figsize: np.ndarray = kwargs.get("figsize", np.array([10, 10]))
     pov: list[float] = kwargs.get("pov", [15, 35, 0])
+    show_legend: bool = kwargs.get("show_legend", False)
     show: bool = kwargs.get("show", False)
 
     # Validate inputs
@@ -118,7 +128,8 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
 
     # Preprocess
     n, _, m = paths.shape  # Extract dimensions
-    time = np.arange(n)  # Create time array for z-axis
+    if time is None:
+        time = np.arange(n)  # Create time array for z-axis
     colors = plt.color_sequences["tab10"][:m]  # Define colormaps
 
     # Normalize space to mxm square for consistent visualization
@@ -138,14 +149,15 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     # Set limits and aspect
     ax.set_xlim(x_lims)
     ax.set_ylim(y_lims)
-    ax.set_zlim(0, n - 1)
+    ax.set_zlim(0, time[-1])
     ax.set_box_aspect([1, 1, 1.7])  # ax.set_aspect("equalxy")
     ax.view_init(elev=pov[0], azim=pov[1], roll=pov[2])
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("t")
     ax.set_title("3D Paths of Agents Over Time")
-    ax.legend()
+    if show_legend is True:
+        ax.legend()
 
     if show:
         plt.show()
@@ -153,7 +165,9 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     return fig, ax
 
 
-def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
+def plot_windings(
+    windings: np.ndarray, time: np.ndarray, **kwargs
+) -> tuple[plt.Figure, plt.Axes]:
     """
     Plot the winding numbers of a braid over time.
 
@@ -161,6 +175,7 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
         windings (np.ndarray): A 3D array of shape (n, m, m) representing n time steps
             of m agents' winding numbers. Each entry windings[t, i, j] gives the winding
             number of agent i with respect to agent j at time step t.
+        time (np.ndarray): A 1D array of shape (n,) representing simulation time.
         windings_ref (np.ndarray, optional): A 3D array of shape (n, m, m) representing
             the reference winding numbers to compare against. If provided, these will be
             plotted as dashed lines with the same color as the corresponding winding
@@ -188,18 +203,18 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
         raise TypeError("Input 'windings' must be a numpy array.")
     if windings.ndim != 3 or windings.shape[1] != windings.shape[2]:
         raise ValueError("Input 'windings' must be a 3D array of shape (n, m, m).")
+    if windings_ref is not None:
+        if windings_ref.ndim != 3 or windings_ref.shape[1] != windings_ref.shape[2]:
+            raise ValueError(
+                "Input 'windings_ref' must be a 3D array of shape (n, m, m)."
+            )
     if not isinstance(figsize, np.ndarray):
         if not isinstance(figsize, (tuple, list)):
             raise TypeError("Input 'figsize' must be a numpy array, tuple, or list.")
         figsize = np.array(figsize)
 
     # Extract dimensions
-    n, m, _ = windings.shape
-
-    # Create time vectors
-    time = np.linspace(0, 1, n)
-    if windings_ref is not None:
-        time_ref = np.linspace(0, 1, windings_ref.shape[0])
+    _, m, _ = windings.shape
 
     # Define colormaps
     colors = plt.color_sequences["tab10"][:m]  # Define colormaps
@@ -240,7 +255,7 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
             )
             if windings_ref is not None:  # Plot reference windings if provided
                 ax.plot(
-                    time_ref,
+                    time,
                     windings_ref[:, i, j],
                     linewidth=1.5,
                     color=colors[j],
@@ -250,7 +265,7 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
                 )
 
         # Set labels and title
-        ax.set_xlim(0, 1)
+        ax.set_xlim(0, time[-1])
         ax.set_ylim(windings.min() - 1, windings.max() + 1)
         ax.grid(
             True, which="major", linestyle=":", color="gray", linewidth=0.5, zorder=1
@@ -261,7 +276,6 @@ def plot_windings(windings: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]
         ax.minorticks_on()
         ax.set_title(f"Agent {i+1}", color=colors[i], fontsize=10)
         ax.set_xlabel("t")
-        ax.set_ylabel("$w_{ij}$")
         ax.grid(True)
 
         if show_legends:
@@ -350,7 +364,6 @@ def plot_cost(
         ax.minorticks_on()
         ax.set_xlabel("t (s)")
         ax.set_ylabel("Cost")
-        ax.legend()
         if show_legend:
             ax.legend()
 
@@ -369,3 +382,70 @@ def plot_cost(
         plt.show()
 
     return fig, axes
+
+
+def plot_tau(
+    tau: np.ndarray, time: np.ndarray, tau_i: np.ndarray | None = None, **kwargs
+) -> tuple[plt.Figure, plt.Axes]:
+    """
+    Plot the progress variable tau over time.
+
+    Args:
+        tau (np.ndarray): A 1D array of shape (n,) representing the progress variable
+            tau at each time step.
+        time (np.ndarray): A 1D array of shape (n,) representing the time steps
+            corresponding to the tau values.
+        tau_i (np.ndarray | None, optional): A 2D array of shape (n, m) representing
+            the individual progress variables tau_i for each agent at each time step.
+            If provided, these will be plotted as dashed lines. Default is None.
+        figsize (tuple[float, float], optional): The size of the figure in cm.
+        show_legend (bool, optional): Whether to show legend for the plot. Default is
+            False.
+        show (bool, optional): Whether to display the plot. Default is False.
+
+    Returns:
+        tuple[plt.Figure, plt.Axes]: The figure and axes objects for the plot.
+    """
+    # Parse kwargs
+    figsize: np.ndarray = kwargs.get("figsize", np.array([10, 10]))
+    show_legend: bool = kwargs.get("show_legend", False)
+    show: bool = kwargs.get("show", False)
+
+    # Extract dimensions
+    m = tau_i.shape[1] if tau_i is not None else 0
+
+    # Define colormaps
+    colors = plt.color_sequences["tab10"][:m]
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=figsize / 2.54)
+    ax.plot(time, tau, linewidth=1.5, color="black", label="tau", zorder=5)
+    if tau_i is not None:
+        for i in range(m):
+            ax.plot(
+                time,
+                tau_i[:, i],
+                linewidth=1.2,
+                color=colors[i],
+                linestyle="--",
+                label=f"tau_{i}",
+                zorder=4,
+            )
+
+    # Set labels and title
+    ax.set_xlim(time.min() - 1, time.max() + 1)
+    ax.set_ylim(-0.1, 1.1)  # tau is always between 0 and 1
+    ax.grid(True, which="major", linestyle=":", color="gray", linewidth=0.5, zorder=1)
+    ax.grid(True, which="minor", linestyle=":", color="gray", linewidth=0.3, zorder=1)
+    ax.minorticks_on()
+    ax.set_title("Progress variable tau", fontsize=10)
+    ax.set_xlabel("t")
+    ax.set_ylabel("tau")
+
+    if show_legend:
+        ax.legend()
+
+    if show:
+        plt.show()
+
+    return fig, ax
