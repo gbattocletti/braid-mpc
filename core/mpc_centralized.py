@@ -46,6 +46,7 @@ class CentralizedMPC(MPC):
         # Initial state constraint
         for i in range(self.m):
             self.ocp.subject_to(self.x[i][0, :] == self.x_0[:, i].T)
+            self.constraints.append(f"initial conditions i:{i}")
 
         # Dynamics
         for i in range(self.m):
@@ -55,6 +56,7 @@ class CentralizedMPC(MPC):
                     + self.dxdt(self.x[i][k, :], self.u[i][k, :]) * self.dt
                 )
                 self.ocp.subject_to(self.x[i][k + 1, :] == x_next)
+                self.constraints.append(f"dynamics i:{i} k:{k}")
 
         # State constraints
         if self.x_min is not None and self.x_max is not None:
@@ -65,7 +67,9 @@ class CentralizedMPC(MPC):
             for i in range(self.m):
                 for k in range(self.K + 1):
                     self.ocp.subject_to(self.x_min <= self.x[i][k, : self.n_x_pos])
+                    self.constraints.append(f"state constraints min i:{i} k:{k}")
                     self.ocp.subject_to(self.x[i][k, : self.n_x_pos] <= self.x_max)
+                    self.constraints.append(f"state constraints max i:{i} k:{k}")
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:
@@ -76,7 +80,9 @@ class CentralizedMPC(MPC):
             for i in range(self.m):
                 for k in range(self.K):
                     self.ocp.subject_to(self.u_min <= self.u[i][k, :])
+                    self.constraints.append(f"input constraints min i:{i} k:{k}")
                     self.ocp.subject_to(self.u[i][k, :] <= self.u_max)
+                    self.constraints.append(f"input constraints max i:{i} k:{k}")
 
         # Input rate constraints
         # NOTE: the previous u (i.e., the one applied at the previous time step) should
@@ -92,15 +98,18 @@ class CentralizedMPC(MPC):
                     self.ocp.subject_to(
                         self.u_rate_min <= self.u[i][k + 1, :] - self.u[i][k, :]
                     )
+                    self.constraints.append(f"input rate constraints min i:{i} k:{k}")
                     self.ocp.subject_to(
                         self.u[i][k + 1, :] - self.u[i][k, :] <= self.u_rate_max
                     )
+                    self.constraints.append(f"input rate constraints max i:{i} k:{k}")
 
         # Total input constraints
         if self.u_tot_max is not None:
             for i in range(self.m):
                 for k in range(self.K):
                     self.ocp.subject_to(ca.norm_1(self.u[i][k, :]) <= self.u_tot_max)
+                    self.constraints.append(f"total input constraints i:{i} k:{k}")
 
         # Collision avoidance constraints
         if self.d_min is not None:
@@ -113,6 +122,9 @@ class CentralizedMPC(MPC):
                             self.x[i][k, 1] - self.x[j][k, 1]
                         ) ** 2
                         self.ocp.subject_to(dist >= self.d_min**2)
+                        self.constraints.append(
+                            f"collision avoidance i:{i} j:{j} k:{k}"
+                        )
 
         # Cost function
         self.cost_function = 0
