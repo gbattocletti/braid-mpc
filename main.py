@@ -8,11 +8,12 @@ from matplotlib import patches
 from core import agent, mpc_centralized, mpc_distributed
 from utils import geometry, invariants, io, robotarium_bridge
 from visualization import plot, plot_debug
+from visualization.colors import CmdColors
 
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m5_2.yaml"  # initial and goal locations, topological specification
+DATA = "data/grids_m10_2.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
@@ -21,22 +22,22 @@ DEBUG_HYPERPLANES = False  # whether to plot the hyperplanes and stop the simula
 
 # Select progress strategy along the specification
 # Available approaches are:
-# - uniform_time --> uniform progression over time
-# - winding_progress --> estimate progression from actual trajectories
+# - uniform_time: uniform progression over time
+# - winding_progress: estimate progression from actual trajectories
 # In case of distributed control, an additional selection can be made to determine the
 #  selection of tau from individual estimates. Can be "mean", "min", or "median".
 PROGRESS_STRATEGY = "winding_progress"
 PROGRESS_STRATEGY_DISTRIBUTED = "median"
 
 # Simulation and controller's properties
-DT: float = 0.1  # s
+DT: float = 0.2  # s
 K: int = 20  # time steps
 T: float = 100  # total simulation time (s)
 
 # Cost function weights
 ALPHA_U: float = 0.001  # control cost (constant).
 ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
-EXP_GOAL: int = 20  # exponent for time-varying goal cost weight
+EXP_GOAL: int = 40  # exponent for time-varying goal cost weight
 ALPHA_W: float = 1e3  # scaling factor for winding cost; use 0 to disable
 USE_TIME_VARYING_WEIGHTS: bool = True
 
@@ -46,6 +47,7 @@ USE_TIME_VARYING_WEIGHTS: bool = True
 abspath = os.path.abspath(__file__)
 dir_name = os.path.dirname(abspath)
 os.chdir(dir_name)
+print()  # empty line
 
 # Load input data
 data = io.load_yaml(DATA)
@@ -104,7 +106,7 @@ mpc.dt = DT
 mpc.K = K
 mpc.m = m
 mpc.alpha_u = ALPHA_U  # constant (in general)
-mpc.d_min = 2
+mpc.d_min = 1.5
 mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
 if USE_ROBOTARIUM is True:
