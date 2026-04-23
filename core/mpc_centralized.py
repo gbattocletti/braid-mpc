@@ -172,7 +172,7 @@ class CentralizedMPC(MPC):
                     self.u[i][k, :] @ self.R @ self.u[i][k, :].T
                 )
 
-        # Winding cost
+        # Winding cost + winding constraints for guarantees on specification tracking
         for i in range(self.m):
             for j in range(self.m):
                 if i == j:
@@ -196,6 +196,11 @@ class CentralizedMPC(MPC):
 
                     # Add winding cost to the total cost function
                     self.cost_function += alpha_w_ij * (self.w_target[k][i, j] - w) ** 2
+
+                    # Add winding constraint
+                    self.ocp.subject_to(
+                        ca.fabs(w - self.w_target[k][i, j]) < self.w_epsilon
+                    )
 
         # Define the objective
         self.ocp.minimize(self.cost_function)

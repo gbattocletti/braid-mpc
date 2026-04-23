@@ -185,7 +185,7 @@ class DistributedMPC(MPC):
                 self.u[k, :] @ self.R @ self.u[k, :].T
             )
 
-        # Winding cost
+        # Winding cost + winding constraints for guarantees on specification tracking
         # NOTE: the winding cost is only computed w.r.t. other agents, and not w.r.t.
         # itself, since the winding number w.r.t. itself is always 0. Therefore only m-1
         # terms are summed in the winding cost.
@@ -209,6 +209,9 @@ class DistributedMPC(MPC):
 
                 # Add winding cost to the total cost function
                 self.cost_function += alpha_w_j * (self.w_target[k, j] - w) ** 2
+
+                # Add winding constraint
+                self.ocp.subject_to(ca.fabs(w - self.w_target[k, j]) < self.w_epsilon)
 
         # Define the objective
         self.ocp.minimize(self.cost_function)

@@ -31,7 +31,7 @@ PROGRESS_STRATEGY_DISTRIBUTED = "median"
 
 # Simulation and controller's properties
 DT: float = 0.2  # s
-K: int = 10  # time steps
+K: int = 20  # time steps
 T: float = 60  # total simulation time (s)
 
 # Cost function weights
@@ -106,6 +106,7 @@ mpc.dt = DT
 mpc.K = K
 mpc.m = m
 mpc.alpha_u = ALPHA_U  # constant (in general)
+mpc.w_epsilon = 0.5
 mpc.d_min = 1.5
 mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
@@ -139,9 +140,11 @@ if PROGRESS_STRATEGY == "winding_progress":
         v_max = mpc.u_max[0]
 
     # Compute delta tau (upper bound on maximum change in tau over one time step)
-    # current setting: space target winding numbers by tau to maximize progress speed.
+    # Currently I use a manually defined upper bound requiring at least 20 time steps
+    # for the execution of each generator.
     delta_tau: float = 2 / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
-    delta_tau_max = 0.005  # cap delta_tau to avoid going too fast
+    delta_tau_max = 2 / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
+    # delta_tau_max = 1 / (20 * n_generators)  # at least 20 time steps per generator
     if delta_tau > delta_tau_max:
         delta_tau = delta_tau_max
         print(
