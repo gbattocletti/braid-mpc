@@ -65,10 +65,12 @@ class DistributedMPC(MPC):
         self.x_0 = self.ocp.parameter(1, self.n_x)
         self.x_goal = self.ocp.parameter(1, self.n_x)
         self.w_curr = self.ocp.parameter(self.m - 1)  # current winding number (m-1, )
-        self.w_target = self.ocp.parameter(self.m - 1)  # current winding number (m-1, )
+        self.w_target = self.ocp.parameter(
+            self.K + 1, self.m - 1
+        )  # target winding numbers over the horizon (K+1, m-1)
         self.x_pred = [
             self.ocp.parameter(self.K + 1, self.n_x) for _ in range(self.m - 1)
-        ]
+        ]  # predicted state of other agents (m-1 arrays of shape (K+1, n_x))
         self.x_prev = self.ocp.parameter(self.K + 1, self.n_x)  # ego prediction at k-1
         self.alpha_g = self.ocp.parameter()  # scalar
         self.alpha_w = self.ocp.parameter(self.m - 1)  # winding weight (m-1, )
@@ -205,8 +207,8 @@ class DistributedMPC(MPC):
                 )
                 w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
-            # Add winding cost to the total cost function
-            self.cost_function += alpha_w_j * (self.w_target[j] - w) ** 2
+                # Add winding cost to the total cost function
+                self.cost_function += alpha_w_j * (self.w_target[k, j] - w) ** 2
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
@@ -255,9 +257,10 @@ class DistributedMPC(MPC):
             raise ValueError(
                 f"w_curr must have shape ({self.m - 1},), but got {w_curr.shape}."
             )
-        if w_target.shape != (self.m - 1,):
+        if w_target.shape != (self.K + 1, self.m - 1):
             raise ValueError(
-                f"w_target must have shape ({self.m - 1},), but got {w_target.shape}."
+                f"w_target must have shape ({self.K + 1}, {self.m - 1}), "
+                f"but got {w_target.shape}."
             )
         if sol_prev is not None and not isinstance(sol_prev, ca.OptiSol):
             raise ValueError(
@@ -396,7 +399,10 @@ class DistributedMPC(MPC):
 
             # Compute winding number w.r.t. j at the end of prediction horizon
             w: float = w_curr[j] if isinstance(w_curr, np.ndarray) else w_curr
-            w_target_j = w_target[j] if isinstance(w_target, np.ndarray) else w_target
+            if isinstance(w_target[:, j], np.ndarray):
+                w_target_j = w_target[:, j]
+            else:
+                w_target_j = w_target
             for k in range(1, self.K + 1):
                 theta: float = np.atan2(
                     x_pred[j][k, 1] - x[k, 1],
@@ -408,8 +414,8 @@ class DistributedMPC(MPC):
                 )
                 w += 1 / (2 * np.pi) * invariants.angle_diff(theta, theta_prev)
 
-            # Cumulate winding costs
-            winding_cost += alpha_w_j * (w_target_j - w) ** 2
+                # Cumulate winding costs
+                winding_cost += alpha_w_j * (w_target_j[k] - w) ** 2
 
         # Total cost
         cost = goal_cost + control_cost + winding_cost

@@ -66,7 +66,7 @@ class CentralizedMPC(MPC):
         self.x_0 = self.ocp.parameter(self.n_x, self.m)
         self.x_goal = self.ocp.parameter(self.n_x, self.m)
         self.w_curr = self.ocp.parameter(self.m, self.m)
-        self.w_target = self.ocp.parameter(self.m, self.m)
+        self.w_target = [self.ocp.parameter(self.m, self.m) for _ in range(self.K + 1)]
         self.alpha_g = self.ocp.parameter()  # scalar
         self.alpha_w = self.ocp.parameter(self.m, self.m)
 
@@ -194,8 +194,8 @@ class CentralizedMPC(MPC):
                     )
                     w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
-                # Add winding cost to the total cost function
-                self.cost_function += alpha_w_ij * (self.w_target[i, j] - w) ** 2
+                    # Add winding cost to the total cost function
+                    self.cost_function += alpha_w_ij * (self.w_target[k][i, j] - w) ** 2
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
@@ -233,9 +233,9 @@ class CentralizedMPC(MPC):
             raise ValueError(
                 f"w_curr must have shape ({self.m}, {self.m}), but got {w_curr.shape}."
             )
-        if w_target.shape != (self.m, self.m):
+        if w_target.shape != (self.K + 1, self.m, self.m):
             raise ValueError(
-                f"w_target must have shape ({self.m}, {self.m}), "
+                f"w_target must have shape ({self.K + 1}, {self.m}, {self.m}), "
                 f"but got {w_target.shape}."
             )
         if sol_prev is not None and not isinstance(sol_prev, ca.OptiSol):
@@ -256,7 +256,8 @@ class CentralizedMPC(MPC):
         self.ocp.set_value(self.x_0, x_0)
         self.ocp.set_value(self.x_goal, x_goal)
         self.ocp.set_value(self.w_curr, w_curr)
-        self.ocp.set_value(self.w_target, w_target)
+        for k in range(self.K + 1):
+            self.ocp.set_value(self.w_target[k], w_target[k, :, :])
 
         # Warm start
         if use_warm_start is True and sol_prev is not None:
@@ -332,7 +333,7 @@ class CentralizedMPC(MPC):
         x = [self.sol.value(x_i) for x_i in self.x]
         x_goal = self.sol.value(self.x_goal)
         w_curr = self.sol.value(self.w_curr)
-        w_target = self.sol.value(self.w_target)
+        w_target = [self.sol.value(w_target_k) for w_target_k in self.w_target]
         u = [self.sol.value(u_i) for u_i in self.u]
 
         # Goal tracking cost
@@ -373,7 +374,8 @@ class CentralizedMPC(MPC):
                     delta_theta = invariants.angle_diff(theta, theta_prev)
                     w += 1 / (2 * np.pi) * delta_theta
 
-                winding_cost += alpha_w_ij * (w_target[i, j] - w) ** 2
+                    # Add cost of step k for agent i w.r.t. j to the total winding cost
+                    winding_cost += alpha_w_ij * (w_target[k][i, j] - w) ** 2
 
         # Total cost
         cost = goal_cost + control_cost + winding_cost

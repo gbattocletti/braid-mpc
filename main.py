@@ -13,8 +13,8 @@ from visualization.colors import CmdColors
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m10_2.yaml"  # initial and goal locations, topological specification
-CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
+DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
+CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
@@ -31,13 +31,13 @@ PROGRESS_STRATEGY_DISTRIBUTED = "median"
 
 # Simulation and controller's properties
 DT: float = 0.2  # s
-K: int = 20  # time steps
-T: float = 100  # total simulation time (s)
+K: int = 10  # time steps
+T: float = 60  # total simulation time (s)
 
 # Cost function weights
-ALPHA_U: float = 0.001  # control cost (constant).
+ALPHA_U: float = 0.01  # control cost (constant).
 ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
-EXP_GOAL: int = 40  # exponent for time-varying goal cost weight
+EXP_GOAL: int = 40  # exponent for time-varying goal cost weight (active from tau~0.9)
 ALPHA_W: float = 1e3  # scaling factor for winding cost; use 0 to disable
 USE_TIME_VARYING_WEIGHTS: bool = True
 
@@ -124,16 +124,22 @@ else:
     mpc.R = np.diag([1, 1])
 mpc.initialize_ocp()
 
+# Initialize horizon helper variable
+horizon: np.ndarray = np.arange(0, K + 1)  # {0, ..., K}, K+1 elements
+
 # Initialize helper variables to store trajectory predictions (only for distributed MPC)
 x_pred = np.zeros([K + 1, mpc.n_x, m]) if mpc.architecture == "distributed" else None
 x_prev = np.zeros([K + 1, mpc.n_x]) if mpc.architecture == "distributed" else None
 
-# Initialize max progress speed variable
+# Initialize progress speed variable tau
 if PROGRESS_STRATEGY == "winding_progress":
     if mpc.dynamics == "single_integrator":
         v_max = np.linalg.norm(mpc.u_max)
     else:
         v_max = mpc.u_max[0]
+
+    # Compute delta tau (upper bound on maximum change in tau over one time step)
+    # current setting: space target winding numbers by tau to maximize progress speed.
     delta_tau: float = 2 / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
     delta_tau_max = 0.005  # cap delta_tau to avoid going too fast
     if delta_tau > delta_tau_max:
@@ -285,8 +291,8 @@ for step, t in enumerate(time):
 
     # 1b. Compute target winding numbers
     if PROGRESS_STRATEGY == "uniform_time":
-        tau_target = min([(t + K * DT) / T, 1])  # cap target winding at end of braid
-        w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
+        tau_target = np.clip((t + horizon * DT) / T, 0, 1)  # cap tau at end of braid
+
     elif PROGRESS_STRATEGY == "winding_progress":
         # Compute tau (progress variable) from current winding numbers
         if mpc.architecture == "distributed":
@@ -311,7 +317,7 @@ for step, t in enumerate(time):
                     f"{PROGRESS_STRATEGY_DISTRIBUTED}"
                 )
             tau_i_mat[step, :] = tau_i  # save individual tau_i for plotting
-        else:  # centralized case
+        elif mpc.architecture == "centralized":
             tau, _ = invariants.estimate_tau(
                 agent_idx=None,
                 w_measured=w_curr,
@@ -320,14 +326,17 @@ for step, t in enumerate(time):
                 delta_tau_max=delta_tau_K,
                 weights=alpha_w,
             )
-
-        # Find tau_target from tau and compute corresponding w_target
         tau_mat[step] = tau  # save tau for plotting
-        tau_target = min(tau + delta_tau_K, 1)  # cap target winding at end of braid
-        w_target = windings_target[int(tau_target * (n_windings - 1)), :, :]
+
+        # Find tau_target from tau
+        tau_target = np.clip(tau + horizon * delta_tau, 0, 1)
+
     else:
         raise ValueError(f"Invalid progress strategy: {PROGRESS_STRATEGY}")
-    w_target_resampled[step, :, :] = w_target  # save target WN for plotting
+
+    # Compute target winding numbers from tau_target
+    w_target = windings_target[np.astype(tau_target * (n_windings - 1), int), :, :]
+    w_target_resampled[step, :, :] = w_target[-1, :, :]  # save target w at K+1 for plot
 
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
@@ -354,7 +363,7 @@ for step, t in enumerate(time):
                 x_pred=np.delete(x_pred, i, axis=2),
                 x_prev=x_pred[:, :, i],
                 w_curr=np.delete(w_curr[i], i, axis=0),
-                w_target=np.delete(w_target[i], i, axis=0),
+                w_target=np.delete(w_target[:, i, :], i, axis=1),
                 sol_prev=M[i].sol,
                 use_warm_start=True,
             )
