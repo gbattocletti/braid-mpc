@@ -21,8 +21,15 @@ class CentralizedMPC(MPC):
     other agents, as all the trajectories are optimized simultaneously.
     """
 
-    def __init__(self, dynamics: str = "single_integrator") -> None:
-        super().__init__(dynamics=dynamics)
+    def __init__(
+        self,
+        dynamics: str = "single_integrator",
+        progress_strategy: str = "internal",
+    ) -> None:
+        super().__init__(
+            dynamics=dynamics,
+            progress_strategy=progress_strategy,
+        )
         self.architecture = "centralized"
         self.solver_options["print_level"] = 0
         self.solver_options["max_iter"] = 10_000
@@ -66,9 +73,29 @@ class CentralizedMPC(MPC):
         self.x_0 = self.ocp.parameter(self.n_x, self.m)
         self.x_goal = self.ocp.parameter(self.n_x, self.m)
         self.w_curr = self.ocp.parameter(self.m, self.m)
-        self.w_target = [self.ocp.parameter(self.m, self.m) for _ in range(self.K + 1)]
         self.alpha_g = self.ocp.parameter()  # scalar
         self.alpha_w = self.ocp.parameter(self.m, self.m)
+        if self.progress_strategy == "external":
+            self.w_target = [
+                self.ocp.parameter(self.m, self.m) for _ in range(self.K + 1)
+            ]
+            self.tau_curr = None
+        elif self.progress_strategy == "internal":
+            self.delta_tau = self.ocp.variable(self.K)
+            self.tau_curr = self.ocp.parameter()  # scalar
+            self.n_windings = self.w_target_full.shape[0]
+            tau_grid = np.linspace(0, 1, self.n_windings)
+            values_flat = (
+                self.w_target_full.transpose(1, 2, 0)
+                .reshape(self.m * self.m, self.n_windings)
+                .ravel()
+            )
+            self.w_target_interp: ca.Function = ca.interpolant(
+                "w_target_interp",
+                "linear",
+                [tau_grid],
+                values_flat,
+            )
 
         # Constraints
         # Initial state constraint
@@ -98,6 +125,12 @@ class CentralizedMPC(MPC):
                     self.constraints.append(f"state constraints min i:{i} k:{k}")
                     self.ocp.subject_to(self.x[i][k, : self.n_x_pos] <= self.x_max)
                     self.constraints.append(f"state constraints max i:{i} k:{k}")
+
+        # Progress variable constraints
+        if self.delta_tau_min is not None and self.delta_tau_max is not None:
+            for k in range(self.K):
+                self.ocp.subject_to(self.delta_tau_min <= self.delta_tau[k])
+                self.ocp.subject_to(self.delta_tau[k] <= self.delta_tau_max)
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:
@@ -173,17 +206,27 @@ class CentralizedMPC(MPC):
                 )
 
         # Winding cost + winding constraints for guarantees on specification tracking
-        for i in range(self.m):
-            for j in range(self.m):
-                if i == j:
-                    continue  # skip self-winding
+        tau_k = self.tau_curr  # initialize
+        for k in range(1, self.K + 1):
 
-                # Get weight for agent i w.r.t. agent j
-                alpha_w_ij: float = self.alpha_w[i, j]
+            if self.progress_strategy == "internal":
+                tau_k = ca.fmin(tau_k + self.delta_tau[k - 1], 1.0)
+                w_target_k = self.w_target_interp(tau_k)  # (m*m, 1) MX
+                w_target_k = ca.reshape(w_target_k, self.m, self.m).T
+                self.cost_function += self.alpha_tau * (1 - tau_k) ** 2
 
-                # Compute winding number w.r.t. j at the end of prediction horizon
-                w = self.w_curr[i, j]
-                for k in range(1, self.K + 1):
+            for i in range(self.m):
+                for j in range(self.m):
+                    if i == j:
+                        continue  # skip self-winding
+
+                    # Get weight for agent i w.r.t. agent j
+                    alpha_w_ij: float = self.alpha_w[i, j]
+
+                    # Compute winding number w.r.t. j at the end of prediction horizon
+                    w = self.w_curr[i, j]
+
+                    # Compute the change in angle between agents i and j at time k
                     theta: ca.SX | ca.MX = ca.atan2(
                         self.x[j][k, 1] - self.x[i][k, 1],
                         self.x[j][k, 0] - self.x[i][k, 0],
@@ -194,13 +237,19 @@ class CentralizedMPC(MPC):
                     )
                     w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
-                    # Add winding cost to the total cost function
-                    self.cost_function += alpha_w_ij * (self.w_target[k][i, j] - w) ** 2
-
-                    # Add winding constraint
-                    self.ocp.subject_to(
-                        ca.fabs(w - self.w_target[k][i, j]) < self.w_epsilon
-                    )
+                    # Add winding cost to the total cost function and winding constraint
+                    if self.progress_strategy == "external":
+                        self.cost_function += (
+                            alpha_w_ij * (self.w_target[k][i, j] - w) ** 2
+                        )
+                        self.ocp.subject_to(
+                            ca.fabs(w - self.w_target[k][i, j]) < self.w_epsilon
+                        )
+                    else:
+                        self.cost_function += alpha_w_ij * (w_target_k[i, j] - w) ** 2
+                        self.ocp.subject_to(
+                            ca.fabs(w - w_target_k[i, j]) < self.w_epsilon
+                        )
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
@@ -216,7 +265,8 @@ class CentralizedMPC(MPC):
         x_0: np.ndarray,
         x_goal: np.ndarray,
         w_curr: np.ndarray,
-        w_target: np.ndarray,
+        w_target: np.ndarray | None = None,
+        tau_curr: float | None = None,
         use_warm_start: bool = True,
         sol_prev: ca.OptiSol | None = None,
         **kwargs,
@@ -238,10 +288,23 @@ class CentralizedMPC(MPC):
             raise ValueError(
                 f"w_curr must have shape ({self.m}, {self.m}), but got {w_curr.shape}."
             )
-        if w_target.shape != (self.K + 1, self.m, self.m):
+        if w_target is not None and w_target.shape != (self.K + 1, self.m, self.m):
             raise ValueError(
                 f"w_target must have shape ({self.K + 1}, {self.m}, {self.m}), "
                 f"but got {w_target.shape}."
+            )
+        if w_target is not None and self.progress_strategy != "external":
+            warnings.warn(
+                "w_target is provided but progress strategy is not 'external'. "
+                "The w_target argument will be ignored."
+            )
+        elif w_target is None and self.progress_strategy == "external":
+            raise ValueError(
+                "w_target must be provided when using 'external' progress strategy."
+            )
+        if tau_curr is not None and not isinstance(tau_curr, (float, int)):
+            raise ValueError(
+                f"tau_curr must be a scalar (float or int), but got {type(tau_curr)}."
             )
         if sol_prev is not None and not isinstance(sol_prev, ca.OptiSol):
             raise ValueError(
@@ -261,8 +324,11 @@ class CentralizedMPC(MPC):
         self.ocp.set_value(self.x_0, x_0)
         self.ocp.set_value(self.x_goal, x_goal)
         self.ocp.set_value(self.w_curr, w_curr)
-        for k in range(self.K + 1):
-            self.ocp.set_value(self.w_target[k], w_target[k, :, :])
+        if self.progress_strategy == "external":
+            for k in range(self.K + 1):
+                self.ocp.set_value(self.w_target[k], w_target[k, :, :])
+        else:
+            self.ocp.set_value(self.tau_curr, tau_curr)
 
         # Warm start
         if use_warm_start is True and sol_prev is not None:

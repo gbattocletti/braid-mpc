@@ -7,8 +7,15 @@ from utils import invariants
 
 class DistributedMPC(MPC):
 
-    def __init__(self, dynamics: str = "single_integrator") -> None:
-        super().__init__(dynamics=dynamics)
+    def __init__(
+        self,
+        dynamics: str = "single_integrator",
+        progress_strategy: str = "internal",
+    ) -> None:
+        super().__init__(
+            dynamics=dynamics,
+            progress_strategy=progress_strategy,
+        )
         self.architecture = "distributed"
         self.solver_options["print_level"] = 0
         self.solver_options["max_wall_time"] = 10.0  # [s]
@@ -56,6 +63,7 @@ class DistributedMPC(MPC):
         # Initialize optimization variables
         self.x = self.ocp.variable(self.K + 1, self.n_x)  # state trajectory (K+1, n_x)
         self.u = self.ocp.variable(self.K, self.n_u)  # control input (K, n_u)
+        self.delta_tau = self.ocp.variable(self.K)
 
         # Initialize OCP parameters
         # NOTE: in the distributed case, the list of predicted states of the agents,
@@ -93,6 +101,12 @@ class DistributedMPC(MPC):
             for k in range(self.K + 1):
                 self.ocp.subject_to(self.x_min <= self.x[k, : self.n_x_pos])
                 self.ocp.subject_to(self.x[k, : self.n_x_pos] <= self.x_max)
+
+        # Progress variable constraints
+        if self.delta_tau_min is not None and self.delta_tau_max is not None:
+            for k in range(self.K):
+                self.ocp.subject_to(self.delta_tau_min <= self.delta_tau[k])
+                self.ocp.subject_to(self.delta_tau[k] <= self.delta_tau_max)
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:
@@ -171,6 +185,11 @@ class DistributedMPC(MPC):
 
         # Cost function
         self.cost_function = 0
+
+        # Progress variable cost
+        # NOTE: negative to maximize progress speed along specification
+        for k in range(self.K):
+            self.cost_function -= self.alpha_tau * self.delta_tau[k] ** 2
 
         # Goal tracking cost (terminal cost)
         for k in range(1, self.K + 1):

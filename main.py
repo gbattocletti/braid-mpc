@@ -13,7 +13,7 @@ from visualization.colors import CmdColors
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
+DATA = "data/grids_m3_1.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
@@ -30,16 +30,18 @@ PROGRESS_STRATEGY = "winding_progress"
 PROGRESS_STRATEGY_DISTRIBUTED = "median"
 
 # Simulation and controller's properties
-DT: float = 0.2  # s
-K: int = 20  # time steps
+DT: float = 0.1  # s
+K: int = 10  # time steps
 T: float = 60  # total simulation time (s)
 
 # Cost function weights
+USE_TIME_VARYING_WEIGHTS: bool = True
 ALPHA_U: float = 0.01  # control cost (constant).
 ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
 EXP_GOAL: int = 40  # exponent for time-varying goal cost weight (active from tau~0.9)
 ALPHA_W: float = 1e3  # scaling factor for winding cost; use 0 to disable
-USE_TIME_VARYING_WEIGHTS: bool = True
+ALPHA_TAU: float = 0.001  # scaling factor for progress cost; if 0 may cause issues
+USE_EXTERNAL_TARGET: bool = False  # wether to let the MPC choose the progress speed
 
 ## Preprocessing #######################################################################
 
@@ -70,7 +72,7 @@ plot.plot_paths_3d(paths, normalize=True, show=False)
 # Compute target winding numbers
 windings_target = invariants.paths2windings(
     paths,
-    upscale_factor=1000,
+    upscale_factor=10,
     intermediate_shape="linear",
 )  # (n_windings, m, m)
 n_windings = windings_target.shape[0]  # length of the winding number vector
@@ -97,15 +99,21 @@ for i in range(m):
 # Initialize MPC controller
 dynamics = "unicycle" if USE_ROBOTARIUM is True else "single_integrator"
 if CONTROL_ARCHITECTURE == "distributed":
-    mpc = mpc_distributed.DistributedMPC(dynamics=dynamics)
+    mpc = mpc_distributed.DistributedMPC(
+        dynamics=dynamics,
+        progress_strategy="external" if USE_EXTERNAL_TARGET is True else "internal",
+    )
 elif CONTROL_ARCHITECTURE == "centralized":
-    mpc = mpc_centralized.CentralizedMPC(dynamics=dynamics)
+    mpc = mpc_centralized.CentralizedMPC(
+        dynamics=dynamics,
+        progress_strategy="external" if USE_EXTERNAL_TARGET is True else "internal",
+    )
 else:
     raise ValueError(f"Invalid control architecture: {CONTROL_ARCHITECTURE}")
 mpc.dt = DT
 mpc.K = K
 mpc.m = m
-mpc.alpha_u = ALPHA_U  # constant (in general)
+mpc.alpha_u = ALPHA_U  # constant
 mpc.w_epsilon = 0.5
 mpc.d_min = 1.5
 mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
@@ -123,14 +131,6 @@ else:
     mpc.u_min = np.array([-1, -1])  # u is a vector [v_x, v_y]
     mpc.u_max = np.array([1, 1])
     mpc.R = np.diag([1, 1])
-mpc.initialize_ocp()
-
-# Initialize horizon helper variable
-horizon: np.ndarray = np.arange(0, K + 1)  # {0, ..., K}, K+1 elements
-
-# Initialize helper variables to store trajectory predictions (only for distributed MPC)
-x_pred = np.zeros([K + 1, mpc.n_x, m]) if mpc.architecture == "distributed" else None
-x_prev = np.zeros([K + 1, mpc.n_x]) if mpc.architecture == "distributed" else None
 
 # Initialize progress speed variable tau
 if PROGRESS_STRATEGY == "winding_progress":
@@ -143,7 +143,7 @@ if PROGRESS_STRATEGY == "winding_progress":
     # Currently I use a manually defined upper bound requiring at least 20 time steps
     # for the execution of each generator.
     delta_tau: float = 2 / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
-    delta_tau_max = 2 / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
+    delta_tau_max: float = delta_tau
     # delta_tau_max = 1 / (20 * n_generators)  # at least 20 time steps per generator
     if delta_tau > delta_tau_max:
         delta_tau = delta_tau_max
@@ -155,6 +155,27 @@ if PROGRESS_STRATEGY == "winding_progress":
         )
     delta_tau_K: float = K * delta_tau  # max delta_tau over one MPC horizon
 
+# Set MPC progress strategy parameters
+if mpc.progress_strategy == "external":
+    mpc.alpha_tau = 0
+    mpc.w_target_full = np.zeros((m, m))  # not used when passing w_target externally
+    mpc.delta_tau_min = None
+    mpc.delta_tau_max = None
+elif mpc.progress_strategy == "internal":
+    mpc.alpha_tau = ALPHA_TAU
+    mpc.w_target_full = windings_target  # full matrix to select w_target inside mpc
+    mpc.delta_tau_min = 0
+    mpc.delta_tau_max = delta_tau_max
+
+# Initialize MPC
+mpc.initialize_ocp()
+
+# Initialize horizon helper variable
+horizon: np.ndarray = np.arange(0, K + 1)  # {0, ..., K}, K+1 elements
+
+# Initialize helper variables to store trajectory predictions (only for distributed MPC)
+x_pred = np.zeros([K + 1, mpc.n_x, m]) if mpc.architecture == "distributed" else None
+x_prev = np.zeros([K + 1, mpc.n_x]) if mpc.architecture == "distributed" else None
 
 ## Simulation setup ####################################################################
 
@@ -338,8 +359,13 @@ for step, t in enumerate(time):
         raise ValueError(f"Invalid progress strategy: {PROGRESS_STRATEGY}")
 
     # Compute target winding numbers from tau_target
-    w_target = windings_target[np.astype(tau_target * (n_windings - 1), int), :, :]
-    w_target_resampled[step, :, :] = w_target[-1, :, :]  # save target w at K+1 for plot
+    if mpc.progress_strategy == "external":
+        w_target = windings_target[np.astype(tau_target * (n_windings - 1), int), :, :]
+        w_target_resampled[step, :, :] = w_target[
+            -1, :, :
+        ]  # save target w at K+1 for plot
+    else:
+        w_target = None  # w_target selected internally
 
     # 2. Solve MPC problem
     if mpc.architecture == "distributed":
@@ -360,19 +386,25 @@ for step, t in enumerate(time):
             mpc.set_alpha_w(np.delete(alpha_w[i], i, axis=0))  # local for each agent
 
             # Solve local MPC problem
-            (u_opt, x_opt, cost, t_sol) = mpc.solve(
+            (u_opt, x_opt, tau_opt, cost, t_sol) = mpc.solve(
                 x_0=M[i].x,
                 x_goal=M[i].x_goal,
                 x_pred=np.delete(x_pred, i, axis=2),
                 x_prev=x_pred[:, :, i],
                 w_curr=np.delete(w_curr[i], i, axis=0),
-                w_target=np.delete(w_target[:, i, :], i, axis=1),
+                tau_curr=tau,
+                w_target=(
+                    np.delete(w_target[:, i, :], i, axis=1)
+                    if mpc.progress_strategy == "external"
+                    else None
+                ),
                 sol_prev=M[i].sol,
                 use_warm_start=True,
             )
             M[i].sol = mpc.sol  # save solution in agent object
             M[i].u_opt = u_opt
             M[i].x_opt = x_opt
+            M[i].tau_opt = tau_opt
             M[i].cost = cost
             M[i].t_sol = t_sol
 
@@ -415,32 +447,36 @@ for step, t in enumerate(time):
         mpc.set_alpha_w(alpha_w)
 
         # Solve centralized MPC problem
-        (u_opt, x_opt, cost, t_sol) = mpc.solve(
+        (u_opt, x_opt, delta_tau_opt, cost, t_sol) = mpc.solve(
             x_0=x_0,
             x_goal=x_goal,
             w_curr=w_curr,
+            tau_curr=tau,
             w_target=w_target,
             use_warm_start=True,
         )
+
+        print(delta_tau_opt)
 
         # Save solution in agent objects
         for i in range(m):
             M[i].u_opt = u_opt[i]
             M[i].x_opt = x_opt[i]
+            M[i].tau_opt = delta_tau_opt
             M[i].cost = cost  # same cost for all agents in centralized MPC
             M[i].t_sol = t_sol  # same solution time for all agents in centralized MPC
 
-        if DEBUG is True:
-            _, cost_g, cost_u, cost_w = mpc.check_cost()
-            for i in range(m):
-                M[i].cost_u = cost_u  # same cost for all in centralized MPC
-                M[i].cost_g = cost_g
-                M[i].cost_w = cost_w
-            cost_mat[step, 0, :] = cost
-            cost_mat[step, 1, :] = cost_g
-            cost_mat[step, 2, :] = cost_u
-            cost_mat[step, 3, :] = cost_w
-            t_sol_mat[step, :] = t_sol  # same t_sol for all agents
+        # if DEBUG is True:
+        # _, cost_g, cost_u, cost_w = mpc.check_cost()
+        # for i in range(m):
+        #     M[i].cost_u = cost_u  # same cost for all in centralized MPC
+        #     M[i].cost_g = cost_g
+        #     M[i].cost_w = cost_w
+        # cost_mat[step, 0, :] = cost
+        # cost_mat[step, 1, :] = cost_g
+        # cost_mat[step, 2, :] = cost_u
+        # cost_mat[step, 3, :] = cost_w
+        # t_sol_mat[step, :] = t_sol  # same t_sol for all agents
 
     # Sanity check: verify that the predicted trajectories do not lead to collisions
     if DEBUG is True:

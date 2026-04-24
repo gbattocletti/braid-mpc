@@ -7,12 +7,17 @@ import numpy as np
 
 class MPC(ABC):
 
-    def __init__(self, dynamics: str = "single_integrator") -> None:
+    def __init__(
+        self,
+        dynamics: str = "single_integrator",
+        progress_strategy: str = "internal",
+    ) -> None:
         """
         Initialize the MPC controller.
 
         Args:
-            dynamics: The dynamics model to use ("single_integrator" or "unicycle")
+            dynamics (str): Dynamics model to use ("single_integrator" or "unicycle")
+            progress_strategy (str): Progress strategy to use ("internal" or "external")
 
         Returns:
             None
@@ -30,6 +35,11 @@ class MPC(ABC):
             self.dxdt = self._dxdt_uni
         else:
             raise ValueError(f"Invalid dynamics: {self.dynamics}")
+
+        # MPC progress strategy
+        if progress_strategy not in ["internal", "external"]:
+            raise ValueError(f"Invalid progress strategy {progress_strategy}")
+        self.progress_strategy: str = progress_strategy
 
         # MPC parameters
         self.dt: float | None = None  # time step
@@ -70,7 +80,6 @@ class MPC(ABC):
         self.x_0: ca.Opti.parameter  # initial state
         self.x_goal: ca.Opti.parameter  # goal state
         self.w_curr: ca.Opti.parameter  # current winding number w.r.t. agents
-        self.w_target: ca.Opti.parameter  # target winding number w.r.t. agents
         self.w_epsilon: float  # bound on the difference between w and w_target
 
         # Cost function weights and matrices
@@ -90,30 +99,20 @@ class MPC(ABC):
         self.d_min: float | None = None  # minimum distance between agents' positions
         self.constraints: list = []  # for debugging purposes
 
-    def __call__(
-        self,
-        x_0: np.ndarray,
-        x_goal: np.ndarray,
-        w_curr: np.ndarray,
-        w_target: np.ndarray,
-        use_warm_start: bool = True,
-        sol_prev: ca.OptiSol | None = None,
-        **kwargs,
-    ) -> tuple[np.ndarray, np.ndarray, float, float]:
-        """
-        Call the MPC controller to solve the NMPC problem. See the `solve` method for
-        details on the arguments and return values.
-        """
-        u_opt, x_opt, cost, t_sol = self.solve(
-            x_0,
-            x_goal,
-            w_curr,
-            w_target,
-            use_warm_start,
-            sol_prev,
-            **kwargs,
-        )
-        return u_opt, x_opt, cost, t_sol
+        # Progress variables and parameters (only used for internal progress strategy)
+        if self.progress_strategy == "internal":
+            self.tau_curr: ca.Opti.parameter  # current progress parameter (scalar)
+            self.delta_tau: ca.Opti.variable  # progress variable
+            self.alpha_tau: float  # progress cost weight (constant)
+            self.delta_tau_min: float  # minimum progress per time step
+            self.delta_tau_max: float  # maximum progress per time step
+            self.w_target_full: np.ndarray  # when selecting progress speed internally
+            self.w_target_interp: ca.Function  # initialized in _initialize_ocp()
+            self.n_windings: int  # length of w_target_full
+        elif self.progress_strategy == "external":
+            self.w_target: (
+                list[ca.Opti.parameter] | ca.Opti.parameter
+            )  # target winding numbers at each time step
 
     @staticmethod
     def angle_diff(
@@ -266,7 +265,8 @@ class MPC(ABC):
         x_0: np.ndarray,
         x_goal: np.ndarray,
         w_curr: np.ndarray,
-        w_target: np.ndarray,
+        w_target: np.ndarray | None = None,  # TODO: remove/make kwarg?
+        tau_curr: float | None = None,
         use_warm_start: bool = True,
         sol_prev: ca.OptiSol | None = None,
         **kwargs,
@@ -278,7 +278,8 @@ class MPC(ABC):
             x_0 (np.ndarray): initial state
             x_goal (np.ndarray): goal state
             w_curr (np.ndarray): current winding numbers
-            w_target (np.ndarray): target winding numbers
+            w_target (np.ndarray | None): target winding numbers
+            tau_curr (float | None): current progress parameter
             use_warm_start (bool, optional): whether to use the previous solution for
                 warm starting
             sol_prev (ca.OptiSol | None, optional): previous solution for warm starting
@@ -308,6 +309,7 @@ class MPC(ABC):
             x_goal,
             w_curr,
             w_target,
+            tau_curr,
             use_warm_start,
             sol_prev,
             **kwargs,
@@ -322,13 +324,16 @@ class MPC(ABC):
             x_opt: list[np.ndarray] = [self.sol.value(self.x[i]) for i in range(self.m)]
         else:
             raise ValueError(f"Invalid architecture: {self.architecture}")
+        tau_opt: np.ndarray
+        if self.progress_strategy == "internal":
+            tau_opt = self.sol.value(self.delta_tau)
+        else:
+            tau_opt = np.zeros(self.K)  # default output for external progress strategy
         c: float = self.sol.value(self.cost_function)
-        t: float = self.sol.stats()[
-            "t_proc_total"
-        ]  # CPU time. Alternative: t_wall_total for wall time
+        t: float = self.sol.stats()["t_proc_total"]  # CPU time (alt: t_wall_total)
 
         # Return the solution
-        return u_opt, x_opt, c, t
+        return u_opt, x_opt, tau_opt, c, t
 
     @abstractmethod
     def _solve(
@@ -336,7 +341,8 @@ class MPC(ABC):
         x_0: np.ndarray,
         x_goal: np.ndarray,
         w_curr: np.ndarray,
-        w_target: np.ndarray,
+        w_target: np.ndarray | None = None,
+        tau_curr: float | None = None,
         use_warm_start: bool = True,
         sol_prev: ca.OptiSol | None = None,
         **kwargs,
@@ -346,7 +352,7 @@ class MPC(ABC):
         )
 
     @abstractmethod
-    def check_cost(self) -> tuple[float, float, float, float]:
+    def check_cost(self) -> tuple[float, float, float, float, float]:
         """
         Compute the cost function value for the current solution. This is a helper
         method intended for debugging and testing.
@@ -355,7 +361,11 @@ class MPC(ABC):
             None
 
         Returns:
-            float: optimal cost
+            float: optimal cost (total cost)
+            float: goal tracking cost
+            float: control input cost
+            float: progress cost
+            float: winding cost
 
         Raises:
             RuntimeError: if the OCP has not been solved yet.

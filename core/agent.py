@@ -21,6 +21,7 @@ class Agent:
         self.x: np.ndarray | None = None  # current state of the agent
         self.x_opt: np.ndarray | None = None  # state trajectory from MPC solution
         self.u_opt: np.ndarray | None = None  # control trajectory from MPC solution
+        self.tau_opt: np.ndarray | None = None  # progress trajectory from MPC solution
 
         # Agent goal info
         self.x_goal: np.ndarray | None = None  # goal state of the agent
