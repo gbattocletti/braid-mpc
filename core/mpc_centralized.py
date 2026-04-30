@@ -86,17 +86,11 @@ class CentralizedMPC(MPC):
             self.n_windings = self.w_target_full.shape[0]
 
             # create 1D interpolation function for w_target based on tau
-            tau_grid = np.linspace(0, 1, self.n_windings)
-            values_flat = (
-                self.w_target_full.transpose(1, 2, 0)
-                .reshape(self.m * self.m, self.n_windings)
-                .ravel()
-            )
             self.w_target_interp: ca.Function = ca.interpolant(
                 "w_target_interp",
                 "linear",
-                [tau_grid],
-                values_flat,
+                [np.linspace(0, 1, self.n_windings)],
+                self.w_target_full.ravel(),
             )
 
         # Constraints
@@ -247,10 +241,10 @@ class CentralizedMPC(MPC):
 
                     # Add winding cost to the total cost function and winding constraint
                     self.cost_function += alpha_w_ij * (w_target_k[i, j] - w) ** 2
-                    if self.epsilon_w is not None:
-                        self.ocp.subject_to(
-                            ca.fabs(w - w_target_k[i, j]) < self.epsilon_w
-                        )
+                    # if self.epsilon_w is not None:
+                    #     self.ocp.subject_to(
+                    #         ca.fabs(w - w_target_k[i, j]) < self.epsilon_w
+                    #     )
 
         # Define the objective
         self.ocp.minimize(self.cost_function)

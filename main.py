@@ -35,12 +35,12 @@ T: float = 60  # total simulation time (s)
 
 # Cost function weights
 USE_TIME_VARYING_WEIGHTS: bool = True
-ALPHA_U: float = 0.01  # control cost (constant).
+ALPHA_U: float = 0.001  # control cost (constant).
 ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
 EXP_GOAL: int = 40  # exponent for time-varying goal cost weight (active from tau~0.9)
 ALPHA_W: float = 1e3  # scaling factor for winding cost; use 0 to disable
-ALPHA_TAU: float = 0.001  # scaling factor for progress cost; if 0 may cause issues
-USE_EXTERNAL_TARGET: bool = False  # wether to let the MPC choose the progress speed
+ALPHA_TAU: float = 1  # scaling factor for progress cost; if 0 may cause issues
+USE_EXTERNAL_TARGET: bool = True  # wether to let the MPC choose the progress speed
 
 ## Preprocessing #######################################################################
 
@@ -71,7 +71,7 @@ plot.plot_paths_3d(paths, normalize=True, show=False)
 # Compute target winding numbers
 windings_target = invariants.paths2windings(
     paths,
-    upscale_factor=10,
+    upscale_factor=1000,
     intermediate_shape="linear",
 )  # (n_windings, m, m)
 n_windings = windings_target.shape[0]  # length of the winding number vector
@@ -114,7 +114,7 @@ mpc.K = K
 mpc.m = m
 mpc.alpha_u = ALPHA_U  # constant
 mpc.epsilon_w = None
-mpc.d_min = 1.5  # TODO: update with d'_min = sqrt(d_min^2 + (v_max*dt)^2)
+mpc.d_min = 1.5
 mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
 if USE_ROBOTARIUM is True:
@@ -344,6 +344,8 @@ for step, t in enumerate(time):
                 weights=alpha_w,
             )
         tau_mat[step] = tau  # save tau for plotting
+
+        print(tau)
 
         # Find tau_target from tau
         tau_target = np.clip(tau + horizon * delta_tau_max, 0, 1)
