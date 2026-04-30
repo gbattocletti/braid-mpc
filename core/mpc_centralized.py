@@ -81,9 +81,11 @@ class CentralizedMPC(MPC):
             ]
             self.tau_curr = None
         elif self.progress_strategy == "internal":
-            self.delta_tau = self.ocp.variable(self.K)
+            self.tau = self.ocp.variable(self.K + 1)
             self.tau_curr = self.ocp.parameter()  # scalar
             self.n_windings = self.w_target_full.shape[0]
+
+            # create 1D interpolation function for w_target based on tau
             tau_grid = np.linspace(0, 1, self.n_windings)
             values_flat = (
                 self.w_target_full.transpose(1, 2, 0)
@@ -101,6 +103,8 @@ class CentralizedMPC(MPC):
         # Initial state constraint
         for i in range(self.m):
             self.ocp.subject_to(self.x[i][0, :] == self.x_0[:, i].T)
+            if self.progress_strategy == "internal":
+                self.ocp.subject_to(self.tau[0] == self.tau_curr)  # tau(0|k) = tau_curr
 
         # Dynamics
         for i in range(self.m):
@@ -123,10 +127,20 @@ class CentralizedMPC(MPC):
                     self.ocp.subject_to(self.x[i][k, : self.n_x_pos] <= self.x_max)
 
         # Progress variable constraints
-        if self.delta_tau_min is not None and self.delta_tau_max is not None:
-            for k in range(self.K):
-                self.ocp.subject_to(self.delta_tau_min <= self.delta_tau[k])
-                self.ocp.subject_to(self.delta_tau[k] <= self.delta_tau_max)
+        if self.progress_strategy == "internal":
+            for k in range(1, self.K + 1):
+                # bound tau(h|k) between 0 and 1
+                self.ocp.subject_to(0 <= self.tau[k])
+                self.ocp.subject_to(self.tau[k] <= 1)
+
+                # bound variation of tau between delta_tau_min and delta_tau_max
+                if self.delta_tau_min is not None and self.delta_tau_max is not None:
+                    self.ocp.subject_to(
+                        self.delta_tau_min <= self.tau[k] - self.tau[k - 1]
+                    )
+                    self.ocp.subject_to(
+                        self.tau[k] - self.tau[k - 1] <= self.delta_tau_max
+                    )
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:
@@ -198,10 +212,17 @@ class CentralizedMPC(MPC):
         for k in range(1, self.K + 1):
 
             if self.progress_strategy == "internal":
-                tau_k = ca.fmin(tau_k + self.delta_tau[k - 1], 1.0)
-                w_target_k = self.w_target_interp(tau_k)  # (m*m, 1) MX
-                w_target_k = ca.reshape(w_target_k, self.m, self.m).T
+
+                # Compute target at tau(h|k)
+                w_target_k = ca.reshape(
+                    self.w_target_interp(self.tau[k]), self.m, self.m
+                )  # (m, m) MX
+
+                # Add progress cost to the total cost function
                 self.cost_function += self.alpha_tau * (1 - tau_k) ** 2
+
+            else:  # self.progress_strategy == "external"
+                w_target_k = self.w_target[k]
 
             for i in range(self.m):
                 for j in range(self.m):
@@ -226,18 +247,8 @@ class CentralizedMPC(MPC):
                     w += 1 / (2 * np.pi) * self.angle_diff(theta, theta_prev)
 
                     # Add winding cost to the total cost function and winding constraint
-                    if self.progress_strategy == "external":
-                        self.cost_function += (
-                            alpha_w_ij * (self.w_target[k][i, j] - w) ** 2
-                        )
-                        self.ocp.subject_to(
-                            ca.fabs(w - self.w_target[k][i, j]) < self.w_epsilon
-                        )
-                    else:
-                        self.cost_function += alpha_w_ij * (w_target_k[i, j] - w) ** 2
-                        self.ocp.subject_to(
-                            ca.fabs(w - w_target_k[i, j]) < self.w_epsilon
-                        )
+                    self.cost_function += alpha_w_ij * (w_target_k[i, j] - w) ** 2
+                    self.ocp.subject_to(ca.fabs(w - w_target_k[i, j]) < self.epsilon_w)
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
