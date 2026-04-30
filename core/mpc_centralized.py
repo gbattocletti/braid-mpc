@@ -208,7 +208,6 @@ class CentralizedMPC(MPC):
                 )
 
         # Winding cost + winding constraints for guarantees on specification tracking
-        tau_k = self.tau_curr  # initialize
         for k in range(1, self.K + 1):
 
             if self.progress_strategy == "internal":
@@ -219,7 +218,7 @@ class CentralizedMPC(MPC):
                 )  # (m, m) MX
 
                 # Add progress cost to the total cost function
-                self.cost_function += self.alpha_tau * (1 - tau_k) ** 2
+                self.cost_function += self.alpha_tau * (1 - self.tau[k]) ** 2
 
             else:  # self.progress_strategy == "external"
                 w_target_k = self.w_target[k]
@@ -248,7 +247,10 @@ class CentralizedMPC(MPC):
 
                     # Add winding cost to the total cost function and winding constraint
                     self.cost_function += alpha_w_ij * (w_target_k[i, j] - w) ** 2
-                    self.ocp.subject_to(ca.fabs(w - w_target_k[i, j]) < self.epsilon_w)
+                    if self.epsilon_w is not None:
+                        self.ocp.subject_to(
+                            ca.fabs(w - w_target_k[i, j]) < self.epsilon_w
+                        )
 
         # Define the objective
         self.ocp.minimize(self.cost_function)

@@ -71,7 +71,7 @@ plot.plot_paths_3d(paths, normalize=True, show=False)
 # Compute target winding numbers
 windings_target = invariants.paths2windings(
     paths,
-    upscale_factor=100,
+    upscale_factor=10,
     intermediate_shape="linear",
 )  # (n_windings, m, m)
 n_windings = windings_target.shape[0]  # length of the winding number vector
@@ -113,7 +113,7 @@ mpc.dt = DT
 mpc.K = K
 mpc.m = m
 mpc.alpha_u = ALPHA_U  # constant
-mpc.epsilon_w = 0.5
+mpc.epsilon_w = None
 mpc.d_min = 1.5  # TODO: update with d'_min = sqrt(d_min^2 + (v_max*dt)^2)
 mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
@@ -449,6 +449,7 @@ for step, t in enumerate(time):
             use_warm_start=True,
         )
 
+        print(tau_opt)
         print(tau_opt[1:] - tau_opt[:-1])  # check delta_tau
 
         # Save solution in agent objects
