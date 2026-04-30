@@ -8,12 +8,11 @@ from matplotlib import patches
 from core import agent, mpc_centralized, mpc_distributed
 from utils import geometry, invariants, io, robotarium_bridge
 from visualization import plot, plot_debug
-from visualization.colors import CmdColors
 
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m3_1.yaml"  # initial and goal locations, topological specification
+DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
@@ -72,7 +71,7 @@ plot.plot_paths_3d(paths, normalize=True, show=False)
 # Compute target winding numbers
 windings_target = invariants.paths2windings(
     paths,
-    upscale_factor=10,
+    upscale_factor=100,
     intermediate_shape="linear",
 )  # (n_windings, m, m)
 n_windings = windings_target.shape[0]  # length of the winding number vector
@@ -114,8 +113,8 @@ mpc.dt = DT
 mpc.K = K
 mpc.m = m
 mpc.alpha_u = ALPHA_U  # constant
-mpc.w_epsilon = 0.5
-mpc.d_min = 1.5
+mpc.epsilon_w = 0.5
+mpc.d_min = 1.5  # TODO: update with d'_min = sqrt(d_min^2 + (v_max*dt)^2)
 mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
 if USE_ROBOTARIUM is True:
@@ -142,30 +141,24 @@ if PROGRESS_STRATEGY == "winding_progress":
     # Compute delta tau (upper bound on maximum change in tau over one time step)
     # Currently I use a manually defined upper bound requiring at least 20 time steps
     # for the execution of each generator.
-    delta_tau: float = 2 / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
-    delta_tau_max: float = delta_tau
+    delta_tau_min: float = 0
+    delta_tau_max: float = (
+        2 / (n_generators * np.pi) * np.arcsin(v_max * DT / mpc.d_min)
+    )
     # delta_tau_max = 1 / (20 * n_generators)  # at least 20 time steps per generator
-    if delta_tau > delta_tau_max:
-        delta_tau = delta_tau_max
-        print(
-            f"{CmdColors.WARNING}[WARNING]{CmdColors.ENDC} computed delta_tau "
-            f"({delta_tau:.4f}) is larger than delta_tau_max ({delta_tau_max:.4f}). "
-            f"Capping delta_tau to delta_tau_max to obtain a smoother progression "
-            "along the braid."
-        )
-    delta_tau_K: float = K * delta_tau  # max delta_tau over one MPC horizon
+else:
+    delta_tau_min = None
+    delta_tau_max = None
 
 # Set MPC progress strategy parameters
 if mpc.progress_strategy == "external":
     mpc.alpha_tau = 0
     mpc.w_target_full = np.zeros((m, m))  # not used when passing w_target externally
-    mpc.delta_tau_min = None
-    mpc.delta_tau_max = None
 elif mpc.progress_strategy == "internal":
     mpc.alpha_tau = ALPHA_TAU
     mpc.w_target_full = windings_target  # full matrix to select w_target inside mpc
-    mpc.delta_tau_min = 0
-    mpc.delta_tau_max = delta_tau_max
+mpc.delta_tau_min = delta_tau_min
+mpc.delta_tau_max = delta_tau_max
 
 # Initialize MPC
 mpc.initialize_ocp()
@@ -326,7 +319,7 @@ for step, t in enumerate(time):
                     w_measured=w_curr,
                     w_reference=windings_target,
                     tau_prev=tau,
-                    delta_tau_max=delta_tau_K,
+                    delta_tau_max=delta_tau_max,
                     weights=alpha_w,
                 )
             if PROGRESS_STRATEGY_DISTRIBUTED == "min":
@@ -347,13 +340,13 @@ for step, t in enumerate(time):
                 w_measured=w_curr,
                 w_reference=windings_target,
                 tau_prev=tau,
-                delta_tau_max=delta_tau_K,
+                delta_tau_max=delta_tau_max,
                 weights=alpha_w,
             )
         tau_mat[step] = tau  # save tau for plotting
 
         # Find tau_target from tau
-        tau_target = np.clip(tau + horizon * delta_tau, 0, 1)
+        tau_target = np.clip(tau + horizon * delta_tau_max, 0, 1)
 
     else:
         raise ValueError(f"Invalid progress strategy: {PROGRESS_STRATEGY}")
@@ -386,7 +379,7 @@ for step, t in enumerate(time):
             mpc.set_alpha_w(np.delete(alpha_w[i], i, axis=0))  # local for each agent
 
             # Solve local MPC problem
-            (u_opt, x_opt, tau_opt, cost, t_sol) = mpc.solve(
+            u_opt, x_opt, tau_opt, cost, t_sol = mpc.solve(
                 x_0=M[i].x,
                 x_goal=M[i].x_goal,
                 x_pred=np.delete(x_pred, i, axis=2),
@@ -447,7 +440,7 @@ for step, t in enumerate(time):
         mpc.set_alpha_w(alpha_w)
 
         # Solve centralized MPC problem
-        (u_opt, x_opt, delta_tau_opt, cost, t_sol) = mpc.solve(
+        u_opt, x_opt, tau_opt, cost, t_sol = mpc.solve(
             x_0=x_0,
             x_goal=x_goal,
             w_curr=w_curr,
@@ -456,13 +449,13 @@ for step, t in enumerate(time):
             use_warm_start=True,
         )
 
-        print(delta_tau_opt)
+        print(tau_opt[1:] - tau_opt[:-1])  # check delta_tau
 
         # Save solution in agent objects
         for i in range(m):
             M[i].u_opt = u_opt[i]
             M[i].x_opt = x_opt[i]
-            M[i].tau_opt = delta_tau_opt
+            M[i].tau_opt = tau_opt
             M[i].cost = cost  # same cost for all agents in centralized MPC
             M[i].t_sol = t_sol  # same solution time for all agents in centralized MPC
 

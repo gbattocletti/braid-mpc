@@ -80,7 +80,7 @@ class MPC(ABC):
         self.x_0: ca.Opti.parameter  # initial state
         self.x_goal: ca.Opti.parameter  # goal state
         self.w_curr: ca.Opti.parameter  # current winding number w.r.t. agents
-        self.w_epsilon: float  # bound on the difference between w and w_target
+        self.epsilon_w: float  # bound on the difference between w and w_target
 
         # Cost function weights and matrices
         self.alpha_g: ca.Opti.parameter  # goal tracking cost weight (time varying)
@@ -101,7 +101,7 @@ class MPC(ABC):
         # Progress variables and parameters (only used for internal progress strategy)
         if self.progress_strategy == "internal":
             self.tau_curr: ca.Opti.parameter  # current progress parameter (scalar)
-            self.delta_tau: ca.Opti.variable  # progress variable
+            self.tau: ca.Opti.variable  # progress variable
             self.alpha_tau: float  # progress cost weight (constant)
             self.delta_tau_min: float  # minimum progress per time step
             self.delta_tau_max: float  # maximum progress per time step
@@ -325,7 +325,7 @@ class MPC(ABC):
             raise ValueError(f"Invalid architecture: {self.architecture}")
         tau_opt: np.ndarray
         if self.progress_strategy == "internal":
-            tau_opt = self.sol.value(self.delta_tau)
+            tau_opt = self.sol.value(self.tau)
         else:
             tau_opt = np.zeros(self.K)  # default output for external progress strategy
         c: float = self.sol.value(self.cost_function)

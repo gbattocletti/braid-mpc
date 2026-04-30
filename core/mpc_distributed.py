@@ -63,7 +63,7 @@ class DistributedMPC(MPC):
         # Initialize optimization variables
         self.x = self.ocp.variable(self.K + 1, self.n_x)  # state trajectory (K+1, n_x)
         self.u = self.ocp.variable(self.K, self.n_u)  # control input (K, n_u)
-        self.delta_tau = self.ocp.variable(self.K)
+        self.tau = self.ocp.variable(self.K + 1)
 
         # Initialize OCP parameters
         # NOTE: in the distributed case, the list of predicted states of the agents,
@@ -103,10 +103,20 @@ class DistributedMPC(MPC):
                 self.ocp.subject_to(self.x[k, : self.n_x_pos] <= self.x_max)
 
         # Progress variable constraints
-        if self.delta_tau_min is not None and self.delta_tau_max is not None:
-            for k in range(self.K):
-                self.ocp.subject_to(self.delta_tau_min <= self.delta_tau[k])
-                self.ocp.subject_to(self.delta_tau[k] <= self.delta_tau_max)
+        if self.progress_strategy == "internal":
+            for k in range(1, self.K + 1):
+                # bound tau(h|k) between 0 and 1
+                self.ocp.subject_to(0 <= self.tau[k])
+                self.ocp.subject_to(self.tau[k] <= 1)
+
+                # bound variation of tau between delta_tau_min and delta_tau_max
+                if self.delta_tau_min is not None and self.delta_tau_max is not None:
+                    self.ocp.subject_to(
+                        self.delta_tau_min <= self.tau[k] - self.tau[k - 1]
+                    )
+                    self.ocp.subject_to(
+                        self.tau[k] - self.tau[k - 1] <= self.delta_tau_max
+                    )
 
         # Input constraints
         if self.u_min is not None and self.u_max is not None:
@@ -188,8 +198,8 @@ class DistributedMPC(MPC):
 
         # Progress variable cost
         # NOTE: negative to maximize progress speed along specification
-        for k in range(self.K):
-            self.cost_function -= self.alpha_tau * self.delta_tau[k] ** 2
+        for k in range(1, self.K + 1):
+            self.cost_function -= self.alpha_tau * (1 - self.tau[k]) ** 2
 
         # Goal tracking cost (terminal cost)
         for k in range(1, self.K + 1):
@@ -208,6 +218,7 @@ class DistributedMPC(MPC):
         # NOTE: the winding cost is only computed w.r.t. other agents, and not w.r.t.
         # itself, since the winding number w.r.t. itself is always 0. Therefore only m-1
         # terms are summed in the winding cost.
+        # TODO: fix this for case with internal progress variable
         for j in range(self.m - 1):
 
             # Get weight for agent j
@@ -230,7 +241,7 @@ class DistributedMPC(MPC):
                 self.cost_function += alpha_w_j * (self.w_target[k, j] - w) ** 2
 
                 # Add winding constraint
-                self.ocp.subject_to(ca.fabs(w - self.w_target[k, j]) < self.w_epsilon)
+                self.ocp.subject_to(ca.fabs(w - self.w_target[k, j]) < self.epsilon_w)
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
