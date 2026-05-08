@@ -97,8 +97,6 @@ class CentralizedMPC(MPC):
         # Initial state constraint
         for i in range(self.m):
             self.ocp.subject_to(self.x[i][0, :] == self.x_0[:, i].T)
-            if self.progress_strategy == "internal":
-                self.ocp.subject_to(self.tau[0] == self.tau_curr)  # tau(0|k) = tau_curr
 
         # Dynamics
         for i in range(self.m):
@@ -122,6 +120,7 @@ class CentralizedMPC(MPC):
 
         # Progress variable constraints
         if self.progress_strategy == "internal":
+            self.ocp.subject_to(self.tau[0] == self.tau_curr)  # tau(0|k) = tau_curr
             for k in range(1, self.K + 1):
                 # bound tau(h|k) between 0 and 1
                 self.ocp.subject_to(0 <= self.tau[k])
@@ -202,33 +201,31 @@ class CentralizedMPC(MPC):
                 )
 
         # Winding cost + winding constraints for guarantees on specification tracking
-        for k in range(1, self.K + 1):
+        for i in range(self.m):
+            for j in range(self.m):
+                if i == j:
+                    continue  # skip self-winding
 
-            if self.progress_strategy == "internal":
+                # Get weight for agent i w.r.t. agent j
+                alpha_w_ij: float = self.alpha_w[i, j]
 
-                # Compute target at tau(h|k)
-                w_target_k = ca.reshape(
-                    self.w_target_interp(self.tau[k]), self.m, self.m
-                )  # (m, m) MX
+                # Compute winding number w.r.t. j at the end of prediction horizon
+                w = self.w_curr[i, j]
 
-                # Add progress cost to the total cost function
-                self.cost_function += self.alpha_tau * (1 - self.tau[k]) ** 2
+                for k in range(1, self.K + 1):
 
-            else:  # self.progress_strategy == "external"
-                w_target_k = self.w_target[k]
+                    # Compute target winding number
+                    if self.progress_strategy == "internal":
 
-            for i in range(self.m):
-                for j in range(self.m):
-                    if i == j:
-                        continue  # skip self-winding
+                        # Compute target at tau(h|k)
+                        w_target_k = ca.reshape(
+                            self.w_target_interp(self.tau[k]), self.m, self.m
+                        )  # (m, m) MX
 
-                    # Get weight for agent i w.r.t. agent j
-                    alpha_w_ij: float = self.alpha_w[i, j]
+                    else:  # self.progress_strategy == "external"
+                        w_target_k = self.w_target[k]
 
-                    # Compute winding number w.r.t. j at the end of prediction horizon
-                    w = self.w_curr[i, j]
-
-                    # Compute the change in angle between agents i and j at time k
+                    # Compute predicted winding number
                     theta: ca.SX | ca.MX = ca.atan2(
                         self.x[j][k, 1] - self.x[i][k, 1],
                         self.x[j][k, 0] - self.x[i][k, 0],
@@ -241,10 +238,15 @@ class CentralizedMPC(MPC):
 
                     # Add winding cost to the total cost function and winding constraint
                     self.cost_function += alpha_w_ij * (w_target_k[i, j] - w) ** 2
-                    # if self.epsilon_w is not None:
-                    #     self.ocp.subject_to(
-                    #         ca.fabs(w - w_target_k[i, j]) < self.epsilon_w
-                    #     )
+                    if self.epsilon_w is not None:
+                        self.ocp.subject_to(
+                            ca.fabs(w - w_target_k[i, j]) < self.epsilon_w
+                        )
+
+        # Progress cost (only for internal progress variable)
+        if self.progress_strategy == "internal":
+            for k in range(1, self.K + 1):
+                self.cost_function += self.alpha_tau * (1 - self.tau[k]) ** 2
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
