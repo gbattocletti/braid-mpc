@@ -37,7 +37,7 @@ wheels = [
 [[package]]
 name = "braid-controller"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "casadi" },
     { name = "cvxopt" },
@@ -69,7 +69,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.3" },
     { name = "pyqt5", marker = "sys_platform == 'linux'", specifier = ">=5.15.11" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "robotarium-python-simulator", git = "https://github.com/robotarium/robotarium_python_simulator" },
+    { name = "robotarium-python-simulator", git = "https://github.com/robotarium/robotarium_python_simulator?tag=v1.0.0%2Fmain" },
     { name = "scipy", specifier = ">=1.17.1" },
 ]
 provides-extras = ["matlab", "dev"]
@@ -730,7 +730,7 @@ wheels = [
 [[package]]
 name = "robotarium-python-simulator"
 version = "2.0.0"
-source = { git = "https://github.com/robotarium/robotarium_python_simulator#8f00bdccd6251f60d3cff975d4c0c58db8d5bc1b" }
+source = { git = "https://github.com/robotarium/robotarium_python_simulator?tag=v1.0.0%2Fmain#8f00bdccd6251f60d3cff975d4c0c58db8d5bc1b" }
 dependencies = [
     { name = "cvxopt" },
     { name = "matplotlib" },

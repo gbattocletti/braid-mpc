@@ -3,8 +3,8 @@ import warnings
 import casadi as ca
 import numpy as np
 
-from core.mpc import MPC
-from utils import invariants
+from braid_controller.core.mpc import MPC
+from braid_controller.utils import invariants
 
 
 class CentralizedMPC(MPC):

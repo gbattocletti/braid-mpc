@@ -5,17 +5,20 @@ import numpy as np
 import rps.robotarium as rb
 from matplotlib import patches
 
-from core import agent, mpc_centralized, mpc_distributed
-from utils import geometry, invariants, io, robotarium_bridge
-from visualization import plot, plot_debug
-from visualization.colors import CmdColors
+from braid_controller.core import agent, mpc_centralized
+from braid_controller.core import mpc_distributed
+from braid_controller.utils import geometry, invariants, io
+from braid_controller.utils import robotarium_bridge
+from braid_controller.visualization import plot
+from braid_controller.visualization import plot_debug
+from braid_controller.visualization.colors import CmdColors
 
 ## Settings ############################################################################
 
 # User-defined settings
 DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
-USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
+USE_ROBOTARIUM = True  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
 DEBUG_HYPERPLANES = False  # whether to plot the hyperplanes and stop the simulation
@@ -137,7 +140,7 @@ if PROGRESS_STRATEGY == "winding_progress":
     if mpc.dynamics == "single_integrator":
         v_max = np.linalg.norm(mpc.u_max)
     else:
-        v_max = mpc.u_max[0]
+        v_max = mpc.u_max[0][0]
 
     # Compute delta tau (upper bound on maximum change in tau over one time step)
     # Currently I use a manually defined upper bound requiring at least 20 time steps
@@ -360,7 +363,7 @@ for step, t in enumerate(time):
             mpc.set_alpha_w(np.delete(alpha_w[i], i, axis=0))  # local for each agent
 
             # Solve local MPC problem
-            (u_opt, x_opt, cost, t_sol) = mpc.solve(
+            u_opt, x_opt, cost, t_sol = mpc.solve(
                 x_0=M[i].x,
                 x_goal=M[i].x_goal,
                 x_pred=np.delete(x_pred, i, axis=2),
@@ -415,7 +418,7 @@ for step, t in enumerate(time):
         mpc.set_alpha_w(alpha_w)
 
         # Solve centralized MPC problem
-        (u_opt, x_opt, cost, t_sol) = mpc.solve(
+        u_opt, x_opt, cost, t_sol = mpc.solve(
             x_0=x_0,
             x_goal=x_goal,
             w_curr=w_curr,

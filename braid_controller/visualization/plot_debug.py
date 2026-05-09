@@ -5,7 +5,7 @@ Visualisation utilities for debugging the DistributedMPC controller.
 import matplotlib.pyplot as plt
 import numpy as np
 
-from core.mpc_distributed import DistributedMPC
+from braid_controller.core.mpc_distributed import DistributedMPC
 
 
 def half_plane(
