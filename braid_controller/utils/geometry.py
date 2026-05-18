@@ -49,3 +49,34 @@ def check_positions(
                     )
 
     return distances_ok
+
+
+def check_relative_positions(
+    positions: np.ndarray,
+    grid: np.ndarray,
+) -> bool:
+    """
+    Check that the given positions are coherent with the relative position grid.
+
+    Args:
+        positions: A 2-by-m or 3-by-m array of initial or goal positions of m agents.
+        grid: A m-by-m array representing the relative position grid.
+    """
+    m = positions.shape[1]
+    positions = positions[:2, :]  # remove heading (if present)
+
+    # Extract expected (row, col) for each robot
+    rows, cols = np.nonzero(grid)
+    expected_row = np.empty(m, dtype=int)
+    expected_col = np.empty(m, dtype=int)
+    for r, c in zip(rows, cols):
+        k = int(grid[r, c])
+        expected_row[k - 1] = r
+        expected_col[k - 1] = c
+
+    # Extract actual ranks from positions
+    col_rank = np.argsort(np.argsort(positions[0, :]))
+    row_rank = np.argsort(np.argsort(-positions[1, :]))
+
+    # Compare expected vs actual ranks
+    return bool(np.all(row_rank == expected_row) and np.all(col_rank == expected_col))
