@@ -1,6 +1,5 @@
 import casadi as ca
 import numpy as np
-
 from braid_controller.core.mpc import MPC
 from braid_controller.utils import invariants
 
@@ -491,11 +490,11 @@ class DistributedMPC(MPC):
             else:
                 w_target_j = w_target
             for k in range(1, self.K + 1):
-                theta: float = np.atan2(
+                theta: float = np.arctan2(
                     x_pred[j][k, 1] - x[k, 1],
                     x_pred[j][k, 0] - x[k, 0],
                 )
-                theta_prev: float = np.atan2(
+                theta_prev: float = np.arctan2(
                     x_pred[j][k - 1, 1] - x[k - 1, 1],
                     x_pred[j][k - 1, 0] - x[k - 1, 0],
                 )
