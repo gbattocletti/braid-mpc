@@ -17,6 +17,9 @@ class MPC(ABC):
         Returns:
             None
         """
+        # Debug level
+        self.debug: bool = False
+
         # Controller architecture
         self.architecture: str = "centralized"  # {"centralized", "distributed"}
 

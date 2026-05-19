@@ -169,7 +169,7 @@ init_ok = geometry.check_positions(
     dynamics=mpc.dynamics,
     u_max=mpc.u_max,
     dt=mpc.dt,
-    verbose=True,
+    verbose=DEBUG,
 )
 goal_ok = geometry.check_positions(
     x_goal,
@@ -177,7 +177,7 @@ goal_ok = geometry.check_positions(
     dynamics=mpc.dynamics,
     u_max=mpc.u_max,
     dt=mpc.dt,
-    verbose=True,
+    verbose=DEBUG,
 )
 if not init_ok:
     raise ValueError("Initial positions are not admissible for collision avoidance.")

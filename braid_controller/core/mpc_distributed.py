@@ -515,16 +515,23 @@ class DistributedMPC(MPC):
                 + self.alpha_s_2 * np.sum(s_state**2)
             )
             # NOTE: currently not returned for consistency with case where no slack used
-            if slack_cost >= self.alpha_s_1 * (
-                (self.m - 1) * (self.K + 1) + (self.K + 1) * self.n_x_pos
-            ) * (-9.09e-9):
+            if (
+                slack_cost
+                >= self.alpha_s_1
+                * ((self.m - 1) * (self.K + 1) + (self.K + 1) * self.n_x_pos)
+                * (-9.09e-9)
+                and self.debug is True
+            ):
                 print(f"Slack variable was activated: slack cost: {slack_cost}")
 
         # Total cost
         cost = goal_cost + control_cost + winding_cost + slack_cost
 
         # Check if the sum of the cost components matches the total cost
-        if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-6):
+        if (
+            not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-6)
+            and self.debug is True
+        ):
             if idx is not None:
                 print(f"Cost check failed for agent {idx}: ", end="")
             else:

@@ -292,7 +292,7 @@ class CentralizedMPC(MPC):
                 ub_g = np.array((self.ocp.debug.value(self.ocp.ubg))).flatten()
                 violation = np.maximum(g_val - ub_g, 0) + np.maximum(lb_g - g_val, 0)
                 violation_idx = np.argsort(violation)[-10:]  # 10 largest violations
-                for idx in violation_idx:
+                for idx in violation_idx and self.debug is True:
                     print(
                         f"Constraint {idx}: "
                         f"{self.ocp.debug.g_describe(idx)[158:-1]}."
@@ -386,7 +386,10 @@ class CentralizedMPC(MPC):
         cost = goal_cost + control_cost + winding_cost
 
         # Cost validation
-        if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-4):
+        if (
+            not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-4)
+            and self.debug is True
+        ):
             print(
                 f"Cost check failed: computed cost {cost:.4f} does not match "
                 f"cost from solution {self.sol.value(self.cost_function):.4f} "
