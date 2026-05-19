@@ -5,20 +5,17 @@ import numpy as np
 import rps.robotarium as rb
 from matplotlib import patches
 
-from braid_controller.core import agent, mpc_centralized
-from braid_controller.core import mpc_distributed
-from braid_controller.utils import geometry, invariants, io
-from braid_controller.utils import robotarium_bridge
-from braid_controller.visualization import plot
-from braid_controller.visualization import plot_debug
+from braid_controller.core import agent, mpc_centralized, mpc_distributed
+from braid_controller.utils import geometry, invariants, io, robotarium_bridge
+from braid_controller.visualization import plot, plot_debug
 from braid_controller.visualization.colors import CmdColors
 
 ## Settings ############################################################################
 
 # User-defined settings
 DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
-CONTROL_ARCHITECTURE = "centralized"  # "distributed" or "centralized"
-USE_ROBOTARIUM = True  # otherwise, dynamics from the agents' objects is used
+CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
+USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
 DEBUG_HYPERPLANES = False  # whether to plot the hyperplanes and stop the simulation
@@ -35,7 +32,7 @@ PROGRESS_STRATEGY_DISTRIBUTED = "median"
 # Simulation and controller's properties
 DT: float = 0.2  # s
 K: int = 20  # time steps
-T: float = 60  # total simulation time (s)
+T: float = 30  # total simulation time (s)
 
 # Cost function weights
 ALPHA_U: float = 0.01  # control cost (constant).
@@ -108,6 +105,8 @@ else:
 mpc.dt = DT
 mpc.K = K
 mpc.m = m
+mpc.collision_avoidance = "nonconvex"
+mpc.slack_constraint = True
 mpc.alpha_u = ALPHA_U  # constant (in general)
 mpc.w_epsilon = 0.5
 mpc.d_min = 1.5

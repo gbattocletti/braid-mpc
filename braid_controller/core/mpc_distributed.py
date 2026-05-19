@@ -9,7 +9,9 @@ class DistributedMPC(MPC):
 
     def __init__(self, dynamics: str = "single_integrator") -> None:
         super().__init__(dynamics=dynamics)
-        self.architecture = "distributed"
+        self.architecture: str = "distributed"
+        self.collision_avoidance: str = "convex"  # {convex, nonconvex}
+        self.slack_constraint: bool = False  # slack collision avoidance
         self.solver_options["print_level"] = 0
         self.solver_options["max_wall_time"] = 10.0  # [s]
         self.solver_options["max_cpu_time"] = 10.0  # [s]
@@ -25,6 +27,11 @@ class DistributedMPC(MPC):
         # twice to get the shape (K+1, n_x).
         self.x_pred: list[ca.Opti.parameter]  # m-1 arrays of shape (K+1, n_x)
         self.x_prev: ca.Opti.parameter  # optimizer of ego agent at previous time step
+
+        # Variables for slack collision avoidance constraints
+        self.s_coll: ca.Opti.variable
+        self.alpha_s_1: float
+        self.alpha_s_2: float
 
     def set_alpha_w(self, alpha_w: np.ndarray) -> None:
         """
@@ -56,6 +63,12 @@ class DistributedMPC(MPC):
         # Initialize optimization variables
         self.x = self.ocp.variable(self.K + 1, self.n_x)  # state trajectory (K+1, n_x)
         self.u = self.ocp.variable(self.K, self.n_u)  # control input (K, n_u)
+
+        # slack variables for collision avoidance and related weights
+        if self.slack_constraint is True:
+            self.s_coll = self.ocp.variable(self.m - 1, self.K + 1)
+            self.alpha_s_1 = 1e4
+            self.alpha_s_2 = 1e2
 
         # Initialize OCP parameters
         # NOTE: in the distributed case, the list of predicted states of the agents,
@@ -123,51 +136,97 @@ class DistributedMPC(MPC):
                 self.ocp.subject_to(ca.norm_1(self.u[k, :]) <= self.u_tot_max)
 
         # Collision avoidance constraints
-        # NOTE: the collision avoidance constraints are cast as a sequence of convex
-        # constraints that enforce a minimum distance between the trajectory of the ego
-        # agent and the predicted trajectories of the other agents. In order to
-        # guarantee recursive feasibility, the linear constraint is based on the
-        # predicted trajectory of the ego agent at the previous time step, so that the
-        # constraint is the same for both agents i (ego) and j involved. In order to
-        # guarantee recursive feasibility, this constraint is aslo paired with a
-        # terminal constraint on the state x(N|k), which is trivial for a
-        # single-integrator and unicycle dynamics but must be accounted in general.
-        # NOTE: the distance constraint is only computed w.r.t. other agents, and not
-        # w.r.t. itself. Therefore only m-1 constraints are considered here.
-        # Start by computing the safety distance d (>= self.d_min)
-        d: float
-        if self.dynamics == "single_integrator":
-            if self.u_max is not None:
-                v_max = np.sqrt(self.u_max[0, 0] ** 2 + self.u_max[0, 1] ** 2)
-                d = np.sqrt(self.d_min**2 + (v_max * self.dt) ** 2)
-            else:
-                d = self.d_min
-        elif self.dynamics == "unicycle":
-            if self.u_max is not None:
-                d = np.sqrt(self.d_min**2 + self.u_max[0, 0] * self.dt**2)
-            else:
-                d = self.d_min
+        if self.collision_avoidance == "convex":
+            # The collision avoidance constraints are cast as a sequence of convex
+            # constraints that enforce a minimum distance between the trajectory of the
+            # ego agent and the predicted trajectories of the other agents. In order to
+            # guarantee recursive feasibility, the linear constraint is based on the
+            # predicted trajectory of the ego agent at the previous time step, so that
+            # the constraint is the same for both agents i (ego) and j involved. In
+            # order to guarantee recursive feasibility, this constraint is aslo paired
+            # with a terminal constraint on the state x(N|k), which is trivial for a
+            # single-integrator and unicycle dynamics but must be accounted in general.
+            # NOTE: the distance constraint is only computed w.r.t. other agents, and
+            # not w.r.t. itself. Therefore only m-1 constraints are considered here.
+            # NOTE: When using slack==True the d_min distance is assumed to be already
+            # buffered to account for the possible violations of the constraint due to
+            # it being only a soft constraint.
 
-        # Compute the separating hyperplane between the predicted trajectories i and j
-        for j in range(self.m - 1):
-            for k in range(self.K + 1):
-                a_ij = (
-                    self.x_prev[k, : self.n_x_pos] - self.x_pred[j][k, : self.n_x_pos]
-                ) / ca.norm_2(
-                    self.x_prev[k, : self.n_x_pos] - self.x_pred[j][k, : self.n_x_pos]
-                )
-                b_ij = (
-                    ca.dot(
-                        a_ij,
-                        (
-                            self.x_prev[k, : self.n_x_pos]
-                            + self.x_pred[j][k, : self.n_x_pos]
-                        ),
+            # Start by computing the safety distance d (>= self.d_min)
+            d: float
+            if self.dynamics == "single_integrator":
+                if self.u_max is not None:
+                    v_max = np.sqrt(self.u_max[0, 0] ** 2 + self.u_max[0, 1] ** 2)
+                    d = np.sqrt(self.d_min**2 + (v_max * self.dt) ** 2)
+                else:
+                    d = self.d_min
+            elif self.dynamics == "unicycle":
+                if self.u_max is not None:
+                    d = np.sqrt(self.d_min**2 + self.u_max[0, 0] * self.dt**2)
+                else:
+                    d = self.d_min
+
+            # Compute separating hyperplane between predicted trajectories  of i and j
+            for j in range(self.m - 1):
+                for k in range(self.K + 1):
+                    a_ij = (
+                        self.x_prev[k, : self.n_x_pos]
+                        - self.x_pred[j][k, : self.n_x_pos]
+                    ) / ca.norm_2(
+                        self.x_prev[k, : self.n_x_pos]
+                        - self.x_pred[j][k, : self.n_x_pos]
                     )
-                    / 2
-                    + d / 2
-                )
-                self.ocp.subject_to(ca.dot(a_ij, self.x[k, : self.n_x_pos]) >= b_ij)
+                    b_ij = (
+                        ca.dot(
+                            a_ij,
+                            (
+                                self.x_prev[k, : self.n_x_pos]
+                                + self.x_pred[j][k, : self.n_x_pos]
+                            ),
+                        )
+                        / 2
+                        + d / 2
+                    )
+                    if self.slack_constraint is True:
+                        # Add slack variable to the constraint
+                        self.ocp.subject_to(
+                            ca.dot(a_ij, self.x[k, : self.n_x_pos])
+                            >= b_ij - self.s_coll[j, k]
+                        )
+                    else:
+                        self.ocp.subject_to(
+                            ca.dot(a_ij, self.x[k, : self.n_x_pos]) >= b_ij
+                        )
+
+        elif self.collision_avoidance == "nonconvex":
+            # Uses a nonconvex constraint (quadratic constraint for circular agents).
+            # In general, the use ofa nonconvex constraint can lead to infeasibility
+            # of the OCP. To prevent this, it is recommended to use a slack variable to
+            # promote a minimum distance between the ego agent and the predicted
+            # trajectories of the other agents, while keeping the problem feasible.
+            # The slack variable is penalized in the cost function.
+            # NOTE: When using slack==True the d_min distance is assumed to be already
+            # buffered to account for the possible violations of the constraint due to
+            # it being only a soft constraint.
+            for j in range(self.m - 1):
+                for k in range(self.K + 1):
+                    dist_sq = (self.x[k, 0] - self.x_pred[j][k, 0]) ** 2 + (
+                        self.x[k, 1] - self.x_pred[j][k, 1]
+                    ) ** 2
+                    if self.slack_constraint is True:
+                        self.ocp.subject_to(
+                            dist_sq + self.s_coll[j, k] >= self.d_min**2
+                        )
+                    else:
+                        self.ocp.subject_to(dist_sq >= self.d_min**2)
+        else:
+            raise ValueError(
+                f"Invalid collision avoidance method: {self.collision_avoidance}."
+            )
+
+        # Slack variable constraint (to ensure s is non-negative)
+        if self.slack_constraint is True:
+            self.ocp.subject_to(ca.vec(self.s_coll) >= 0)
 
         # Cost function
         self.cost_function = 0
@@ -184,6 +243,12 @@ class DistributedMPC(MPC):
             self.cost_function += self.alpha_u * (
                 self.u[k, :] @ self.R @ self.u[k, :].T
             )
+
+        # Slack variable cost for collision avoidance (if using slack constraints)
+        # Slack penalty is (L1 + L2). L1 gives exact-penalty behavior; L2 helps the QP.
+        if self.slack_constraint is True:
+            self.cost_function += self.alpha_s_1 * ca.sum1(ca.vec(self.s_coll))
+            self.cost_function += self.alpha_s_2 * ca.sumsqr(self.s_coll)
 
         # Winding cost + winding constraints for guarantees on specification tracking
         # NOTE: the winding cost is only computed w.r.t. other agents, and not w.r.t.
@@ -334,7 +399,10 @@ class DistributedMPC(MPC):
             # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-"NaN-detected"in-my-optimization%3F  # pylint: disable=line-too-long
             for k in range(self.K + 1):
                 self.ocp.set_initial(self.x[k, :], x_0)
-            pass
+
+        # Always warm start slack variable to 0 if used
+        if self.slack_constraint is True:
+            self.ocp.set_initial(self.s_coll, 0)
 
         # Solve OCP and return solution object
         sol = self.ocp.solve()
