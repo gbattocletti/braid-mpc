@@ -19,6 +19,7 @@ class Agent:
 
         # Agent state info
         self.x: np.ndarray | None = None  # current state of the agent
+        self.v: np.ndarray | None = None  # current velocity of the agent
         self.x_opt: np.ndarray | None = None  # state trajectory from MPC solution
         self.u_opt: np.ndarray | None = None  # control trajectory from MPC solution
 
@@ -49,3 +50,4 @@ class Agent:
 
         # simple dynamics (single integrator): x_next = x_prev + u*dt
         self.x = self.x + u * self.dt
+        self.v = u
