@@ -15,6 +15,8 @@ from braid_controller.visualization.colors import CmdColors
 # User-defined settings
 DATA = "data/grids_m5_1.yaml"  # initial and goal locations, topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
+COLLISION_AVOIDANCE = "nonconvex"  # {convex, nonconvex}
+SLACK_CONSTRAINT = True  # recommended if line above is "nonconvex"
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
@@ -105,8 +107,8 @@ else:
 mpc.dt = DT
 mpc.K = K
 mpc.m = m
-mpc.collision_avoidance = "nonconvex"
-mpc.slack_constraint = True
+mpc.collision_avoidance = COLLISION_AVOIDANCE
+mpc.slack_constraint = SLACK_CONSTRAINT
 mpc.alpha_u = ALPHA_U  # constant (in general)
 mpc.w_epsilon = 0.5
 mpc.d_min = 1.5

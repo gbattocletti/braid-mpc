@@ -67,8 +67,8 @@ class DistributedMPC(MPC):
         # slack variables for collision avoidance and related weights
         if self.slack_constraint is True:
             self.s_coll = self.ocp.variable(self.m - 1, self.K + 1)
-            self.alpha_s_1 = 1e4
-            self.alpha_s_2 = 1e2
+            self.alpha_s_1 = 1e3
+            self.alpha_s_2 = 1e3
 
         # Initialize OCP parameters
         # NOTE: in the distributed case, the list of predicted states of the agents,
@@ -488,8 +488,18 @@ class DistributedMPC(MPC):
                 # Cumulate winding costs
                 winding_cost += alpha_w_j * (w_target_j[k] - w) ** 2
 
+        slack_cost = 0
+        if self.slack_constraint is True:
+            s = self.sol.value(self.s_coll)  # shape (m-1, K+1)
+            slack_cost = self.alpha_s_1 * np.sum(s) + self.alpha_s_2 * np.sum(s**2)
+            # NOTE: currently not returned for consistency with case where no slack used
+            if slack_cost >= self.alpha_s_1 * ((self.m - 1) * (self.K + 1)) * (
+                -9.09e-9
+            ):
+                print(f"Slack variable was activated: slack cost: {slack_cost}")
+
         # Total cost
-        cost = goal_cost + control_cost + winding_cost
+        cost = goal_cost + control_cost + winding_cost + slack_cost
 
         # Check if the sum of the cost components matches the total cost
         if not np.isclose(cost, self.sol.value(self.cost_function), atol=1e-6):
