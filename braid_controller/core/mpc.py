@@ -74,7 +74,7 @@ class MPC(ABC):
         self.x_goal: ca.Opti.parameter  # goal state
         self.w_curr: ca.Opti.parameter  # current winding number w.r.t. agents
         self.w_target: ca.Opti.parameter  # target winding number w.r.t. agents
-        self.w_epsilon: float  # bound on the difference between w and w_target
+        self.w_epsilon: float | None  # bound on the difference between w and w_target
 
         # Cost function weights and matrices
         self.alpha_g: ca.Opti.parameter  # goal tracking cost weight (time varying)

@@ -296,7 +296,10 @@ class DistributedMPC(MPC):
                 self.cost_function += alpha_w_j * (self.w_target[k, j] - w) ** 2
 
                 # Add winding constraint
-                self.ocp.subject_to(ca.fabs(w - self.w_target[k, j]) < self.w_epsilon)
+                if self.w_epsilon is not None:
+                    self.ocp.subject_to(
+                        ca.fabs(w - self.w_target[k, j]) < self.w_epsilon
+                    )
 
         # Define the objective
         self.ocp.minimize(self.cost_function)
