@@ -1,5 +1,6 @@
 import casadi as ca
 import numpy as np
+
 from braid_controller.core.mpc import MPC
 from braid_controller.utils import invariants
 
@@ -10,7 +11,8 @@ class DistributedMPC(MPC):
         super().__init__(dynamics=dynamics)
         self.architecture: str = "distributed"
         self.collision_avoidance: str = "convex"  # {convex, nonconvex}
-        self.slack_constraints: bool = False  # slack collision and state constraints
+        self.slack_collision_constraints: bool = False  # slack collision constraints
+        self.slack_state_constraints: bool = False  # slack state constraints
         self.solver_options["print_level"] = 0
         self.solver_options["max_wall_time"] = 10.0  # [s]
         self.solver_options["max_cpu_time"] = 10.0  # [s]
@@ -65,11 +67,12 @@ class DistributedMPC(MPC):
         self.u = self.ocp.variable(self.K, self.n_u)  # control input (K, n_u)
 
         # slack variables for collision avoidance and related weights
-        if self.slack_constraints is True:
+        if self.slack_collision_constraints is True:
             self.s_coll = self.ocp.variable(self.m - 1, self.K + 1)
+        if self.slack_state_constraints is True:
             self.s_state = self.ocp.variable(self.K + 1, self.n_x_pos)
-            self.alpha_s_1 = 1e3
-            self.alpha_s_2 = 1e3
+        self.alpha_s_1 = 1e3
+        self.alpha_s_2 = 1e3
 
         # Initialize OCP parameters
         # NOTE: in the distributed case, the list of predicted states of the agents,
@@ -105,7 +108,7 @@ class DistributedMPC(MPC):
             if self.x_max.shape != (1, self.n_x_pos):
                 self.x_max = self.x_max.reshape(1, self.n_x_pos)
             for k in range(self.K + 1):
-                if self.slack_constraints is True:
+                if self.slack_state_constraints is True:
                     # Add slack variable to the constraint
                     self.ocp.subject_to(
                         self.x_min - self.s_state[k, : self.n_x_pos]
@@ -199,7 +202,7 @@ class DistributedMPC(MPC):
                         / 2
                         + d / 2
                     )
-                    if self.slack_constraints is True:
+                    if self.slack_collision_constraints is True:
                         # Add slack variable to the constraint
                         self.ocp.subject_to(
                             ca.dot(a_ij, self.x[k, : self.n_x_pos])
@@ -225,7 +228,7 @@ class DistributedMPC(MPC):
                     dist_sq = (self.x[k, 0] - self.x_pred[j][k, 0]) ** 2 + (
                         self.x[k, 1] - self.x_pred[j][k, 1]
                     ) ** 2
-                    if self.slack_constraints is True:
+                    if self.slack_collision_constraints is True:
                         self.ocp.subject_to(
                             dist_sq + self.s_coll[j, k] >= self.d_min**2
                         )
@@ -237,8 +240,9 @@ class DistributedMPC(MPC):
             )
 
         # Slack variable constraint (to ensure s is non-negative)
-        if self.slack_constraints is True:
+        if self.slack_collision_constraints is True:
             self.ocp.subject_to(ca.vec(self.s_coll) >= 0)
+        if self.slack_state_constraints is True:
             self.ocp.subject_to(ca.vec(self.s_state) >= 0)
 
         # Cost function
@@ -259,9 +263,10 @@ class DistributedMPC(MPC):
 
         # Slack variable cost for state constraints (if enabled)
         # Slack penalty is (L1 + L2). L1 gives exact-penalty behavior; L2 helps the QP.
-        if self.slack_constraints is True:
+        if self.slack_collision_constraints is True:
             self.cost_function += self.alpha_s_1 * ca.sum1(ca.vec(self.s_coll))
             self.cost_function += self.alpha_s_2 * ca.sumsqr(self.s_coll)
+        if self.slack_state_constraints is True:
             self.cost_function += self.alpha_s_1 * ca.sum1(ca.vec(self.s_state))
             self.cost_function += self.alpha_s_2 * ca.sumsqr(self.s_state)
 
@@ -416,8 +421,10 @@ class DistributedMPC(MPC):
                 self.ocp.set_initial(self.x[k, :], x_0)
 
         # Always warm start slack variable to 0 if used
-        if self.slack_constraints is True:
+        if self.slack_collision_constraints is True:
             self.ocp.set_initial(self.s_coll, 0)
+        if self.slack_state_constraints is True:
+            self.ocp.set_initial(self.s_state, 0)
 
         # Solve OCP and return solution object
         sol = self.ocp.solve()
@@ -503,22 +510,23 @@ class DistributedMPC(MPC):
                 # Cumulate winding costs
                 winding_cost += alpha_w_j * (w_target_j[k] - w) ** 2
 
+        # Slack variable cost
         slack_cost = 0
-        if self.slack_constraints is True:
+        n_slacks = 0
+        if self.slack_state_constraints is True:
             s_coll = self.sol.value(self.s_coll)  # shape (m-1, K+1)
-            s_state = self.sol.value(self.s_state)  # shape (K+1, n_x_pos)
-            slack_cost = (
-                self.alpha_s_1 * np.sum(s_coll)
-                + self.alpha_s_2 * np.sum(s_coll**2)
-                + self.alpha_s_1 * np.sum(s_state)
-                + self.alpha_s_2 * np.sum(s_state**2)
+            slack_cost += self.alpha_s_1 * np.sum(s_coll) + self.alpha_s_2 * np.sum(
+                s_coll**2
             )
-            # NOTE: currently not returned for consistency with case where no slack used
+            n_slacks += (self.m - 1) * (self.K + 1)
+        if self.slack_state_constraints is True:
+            s_state = self.sol.value(self.s_state)  # shape (K+1, n_x_pos)
+            slack_cost += self.alpha_s_1 * np.sum(s_state) + self.alpha_s_2 * np.sum(
+                s_state**2
+            )
+            n_slacks += (self.K + 1) * self.n_x_pos
             if (
-                slack_cost
-                >= self.alpha_s_1
-                * ((self.m - 1) * (self.K + 1) + (self.K + 1) * self.n_x_pos)
-                * (-9.09e-9)
+                slack_cost >= self.alpha_s_1 * n_slacks * (-9.09e-9)
                 and self.debug is True
             ):
                 print(f"Slack variable was activated: slack cost: {slack_cost}")
@@ -541,4 +549,5 @@ class DistributedMPC(MPC):
                 f"(error: {abs(cost - self.sol.value(self.cost_function)):.4e})."
             )
 
+        # NOTE: slack cost not returned for consistency with case where no slack used
         return cost, goal_cost, control_cost, winding_cost
