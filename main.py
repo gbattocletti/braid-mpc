@@ -6,14 +6,14 @@ import rps.robotarium as rb
 from matplotlib import patches
 
 from braid_controller.core import agent, mpc_centralized, mpc_distributed
-from braid_controller.utils import geometry, invariants, io, robotarium_bridge
+from braid_controller.utils import geometry, invariants, io, robotarium_bridge, weights
 from braid_controller.visualization import plot, plot_debug
 from braid_controller.visualization.colors import CmdColors
 
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m3_1.yaml"  # initial and goal locations, topological specification
+DATA = "data/grids_m3_spacelab.yaml"  # topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 COLLISION_AVOIDANCE = "nonconvex"  # {convex, nonconvex}
 SLACK_CONSTRAINTS_COLL = True  # recommended if line above is "nonconvex"
@@ -33,16 +33,18 @@ PROGRESS_STRATEGY = "winding_progress"
 PROGRESS_STRATEGY_DISTRIBUTED = "median"
 
 # Simulation and controller's properties
-DT: float = 0.2  # s
+DT: float = 0.1  # s
 K: int = 20  # time steps
-T: float = 30  # total simulation time (s)
+T: float = 60  # total simulation time (s)
 
 # Cost function weights
-ALPHA_U: float = 0.01  # control cost (constant).
+ALPHA_U: float = 0.25  # control cost (constant).
 ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
-EXP_GOAL: int = 40  # exponent for time-varying goal cost weight (active from tau~0.9)
-ALPHA_W: float = 1e3  # scaling factor for winding cost; use 0 to disable
-USE_TIME_VARYING_WEIGHTS: bool = True
+ALPHA_W: float = 10  # scaling factor for winding cost; use 0 to disable
+COEFF_SHARPNESS: float = 20  # sharpness of sigmoid function for time-varying weights
+COEFF_CENTER: float = 0.9  # center of sigmoid function for time-varying weights [0,1]
+USE_TIME_VARYING_WEIGHTS: bool = True  # whether to use time-varying weights for g and w
+SCALE_DOWN_WINDING_COST: bool = True  # whether to scale down w cost as tau increases
 
 ## Preprocessing #######################################################################
 
@@ -112,8 +114,8 @@ mpc.collision_avoidance = COLLISION_AVOIDANCE
 mpc.slack_collision_constraints = SLACK_CONSTRAINTS_COLL
 mpc.slack_state_constraints = SLACK_CONSTRAINTS_STATE
 mpc.alpha_u = ALPHA_U  # constant (in general)
-mpc.w_epsilon = 0.5
-mpc.d_min = 1.5
+mpc.w_epsilon = None
+mpc.d_min = 0.7
 mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
 if USE_ROBOTARIUM is True:
@@ -126,8 +128,10 @@ if USE_ROBOTARIUM is True:
     mpc.u_max = np.array([0.625, 1.25])
     mpc.R = np.diag([1, 0.1])  # lower penalty for angular velocity
 else:
-    mpc.u_min = np.array([-1, -1])  # u is a vector [v_x, v_y]
-    mpc.u_max = np.array([1, 1])
+    mpc.u_min = np.array([-0.5, -0.5])  # u is a vector [v_x, v_y]
+    mpc.u_max = np.array([0.5, 0.5])
+    mpc.u_rate_min = np.array([-0.15, -0.15]) * mpc.dt
+    mpc.u_rate_max = np.array([0.15, 0.15]) * mpc.dt
     mpc.R = np.diag([1, 1])
 mpc.initialize_ocp()
 
@@ -285,17 +289,36 @@ for step, t in enumerate(time):
 
     # 1a. Update time varying weights
     if USE_TIME_VARYING_WEIGHTS is True:
+
+        # Goal cost weight
         if PROGRESS_STRATEGY == "uniform_time":
-            alpha_g = (
-                ALPHA_G * (t / T) ** EXP_GOAL
-            )  # increase goal cost weight over time
+            alpha_g = ALPHA_G * weights.sigmoid(
+                t / T,
+                coeff_sharpness=COEFF_SHARPNESS,
+                coeff_center=COEFF_CENTER,
+            )
         elif PROGRESS_STRATEGY == "winding_progress":
-            alpha_g = (
-                ALPHA_G * (tau / 1.0) ** EXP_GOAL
-            )  # increase goal cost weight over braid progress
-        alpha_w = ALPHA_W * invariants.compute_winding_weights(
-            np.array([M[i].x for i in range(m)]),
-            d_threshold=None,
+            alpha_g = ALPHA_G * weights.sigmoid(
+                tau,
+                coeff_sharpness=COEFF_SHARPNESS,
+                coeff_center=COEFF_CENTER,
+            )
+
+        # Winding cost weight
+        coeff_w: float = 1  # default value
+        if SCALE_DOWN_WINDING_COST is True:
+            coeff_w = 1 - weights.sigmoid(
+                tau,
+                coeff_sharpness=COEFF_SHARPNESS,
+                coeff_center=COEFF_CENTER,
+            )
+        alpha_w = (
+            ALPHA_W
+            * coeff_w
+            * invariants.compute_winding_weights(
+                np.array([M[i].x for i in range(m)]),
+                d_threshold=None,
+            )
         )
 
     # 1b. Compute target winding numbers
