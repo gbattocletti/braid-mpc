@@ -17,7 +17,7 @@ DATA = "data/grids_m3_spacelab.yaml"  # topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 COLLISION_AVOIDANCE = "nonconvex"  # {convex, nonconvex}
 SLACK_CONSTRAINTS_COLL = True  # recommended if line above is "nonconvex"
-SLACK_CONSTRAINTS_STATE = True
+SLACK_CONSTRAINTS_STATE = False
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
@@ -35,12 +35,12 @@ PROGRESS_STRATEGY_DISTRIBUTED = "median"
 # Simulation and controller's properties
 DT: float = 0.1  # s
 K: int = 20  # time steps
-T: float = 60  # total simulation time (s)
+T: float = 180  # total simulation time (s)
 
 # Cost function weights
-ALPHA_U: float = 0.25  # control cost (constant).
+ALPHA_U: float = 0.5  # control cost (constant).
 ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
-ALPHA_W: float = 10  # scaling factor for winding cost; use 0 to disable
+ALPHA_W: float = 5  # scaling factor for winding cost; use 0 to disable
 COEFF_SHARPNESS: float = 20  # sharpness of sigmoid function for time-varying weights
 COEFF_CENTER: float = 0.9  # center of sigmoid function for time-varying weights [0,1]
 USE_TIME_VARYING_WEIGHTS: bool = True  # whether to use time-varying weights for g and w
@@ -76,7 +76,7 @@ plot.plot_paths_3d(paths, normalize=True, show=False)
 windings_target = invariants.paths2windings(
     paths,
     upscale_factor=1000,
-    intermediate_shape="linear",
+    intermediate_shape="spline",
 )  # (n_windings, m, m)
 n_windings = windings_target.shape[0]  # length of the winding number vector
 
@@ -90,6 +90,7 @@ M = [agent.Agent(i) for i in range(m)]
 for i in range(m):
     M[i].dt = DT
     M[i].x = x_init[:, i]
+    M[i].v = np.zeros(3)
     M[i].x_goal = x_goal[:, i]
     M[i].x_opt = np.tile(M[i].x, (K + 1, 1))  # initialize with constant state
     M[i].u_opt = np.zeros((K, 2))  # initialize with zero control inputs
@@ -113,6 +114,7 @@ mpc.m = m
 mpc.collision_avoidance = COLLISION_AVOIDANCE
 mpc.slack_collision_constraints = SLACK_CONSTRAINTS_COLL
 mpc.slack_state_constraints = SLACK_CONSTRAINTS_STATE
+mpc.use_u_rate_constraints = True
 mpc.alpha_u = ALPHA_U  # constant (in general)
 mpc.w_epsilon = None
 mpc.d_min = 0.7
@@ -398,6 +400,11 @@ for step, t in enumerate(time):
                 w_target=np.delete(w_target[:, i, :], i, axis=1),
                 sol_prev=M[i].sol,
                 use_warm_start=True,
+                u_prev=(
+                    np.reshape(M[i].v[:2], (1, mpc.n_u))
+                    if mpc.use_u_rate_constraints is True
+                    else None
+                ),
             )
             M[i].sol = mpc.sol  # save solution in agent object
             M[i].u_opt = u_opt
@@ -513,6 +520,7 @@ for step, t in enumerate(time):
                 [mpc.x_min[0][0], mpc.x_max[0][0]],
                 [mpc.x_min[0][1], mpc.x_max[0][1]],
             )
+            M[i].v = M[i].u_opt[0, :].copy()  # CHECKME
 
     else:
 

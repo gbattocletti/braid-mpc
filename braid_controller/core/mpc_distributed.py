@@ -133,14 +133,38 @@ class DistributedMPC(MPC):
                 self.ocp.subject_to(self.u[k, :] <= self.u_max)
 
         # Input rate constraints
-        # NOTE: the previous u (i.e., the one applied at the previous time step) should
-        # also be taken into account to constraint u[0], but for simplicity we only
-        # constraint the rate between the optimization variables (at least for now).
-        if self.u_rate_min is not None and self.u_rate_max is not None:
+        if (
+            self.use_u_rate_constraints is True
+            and self.u_rate_min is None
+            and self.u_rate_max is None
+        ):
+            raise ValueError(
+                "u_rate_min and u_rate_max must be provided when "
+                "use_u_rate_constraints is True."
+            )
+        elif self.use_u_rate_constraints is False and (
+            self.u_rate_min is not None or self.u_rate_max is not None
+        ):
+            print(
+                "Warning: u_rate_min and u_rate_max are provided but "
+                "use_u_rate_constraints is set to False."
+                "The input rate constraints will not be applied."
+            )
+        else:
+            # Initialize parameter for previous control input
+            self.u_prev = self.ocp.parameter(1, self.n_u)  # control input at k-1
+
+            # Check dimensions of rate constraint
             if self.u_rate_min.shape != (1, self.n_u):
                 self.u_rate_min = self.u_rate_min.reshape(1, self.n_u)
             if self.u_rate_max.shape != (1, self.n_u):
                 self.u_rate_max = self.u_rate_max.reshape(1, self.n_u)
+
+            # Apply rate constraint at 1st control input
+            self.ocp.subject_to(self.u_rate_min <= self.u[0, :] - self.u_prev)
+            self.ocp.subject_to(self.u[0, :] - self.u_prev <= self.u_rate_max)
+
+            # Apply rate constraint to control input vector
             for k in range(self.K - 1):
                 self.ocp.subject_to(self.u_rate_min <= self.u[k + 1, :] - self.u[k, :])
                 self.ocp.subject_to(self.u[k + 1, :] - self.u[k, :] <= self.u_rate_max)
@@ -399,6 +423,15 @@ class DistributedMPC(MPC):
                 f"x_prev must have shape ({self.K + 1}, {self.n_x}), but got "
                 f"{x_prev.shape}."
             )
+        u_prev: np.ndarray = kwargs.get("u_prev", None)
+        if u_prev is not None and not isinstance(u_prev, np.ndarray):
+            raise TypeError(
+                f"u_prev must be a numpy array, but got {type(u_prev)} instead."
+            )
+        elif u_prev is not None and u_prev.shape != (1, self.n_u):
+            raise ValueError(
+                f"u_prev must have shape (1, {self.n_u}), but got {u_prev.shape}."
+            )
 
         # Set parameters in OCP
         self.ocp.set_value(self.x_0, x_0)
@@ -408,6 +441,15 @@ class DistributedMPC(MPC):
         self.ocp.set_value(self.x_prev, x_prev)
         for j in range(self.m - 1):
             self.ocp.set_value(self.x_pred[j], x_pred[:, :, j])
+        if self.use_u_rate_constraints is True:
+            if u_prev is None:
+                # NOTE: this should also be added to the centralized case
+                raise ValueError(
+                    "u_prev must be provided as a kwarg parameter when using "
+                    "rate constraints."
+                )
+            else:
+                self.ocp.set_value(self.u_prev, u_prev)
 
         # Warm start
         # NOTE: in distributed mpc the initial guess must be passed manually, as the

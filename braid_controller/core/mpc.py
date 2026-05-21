@@ -85,6 +85,8 @@ class MPC(ABC):
         # Constraints
         self.u_min: np.ndarray | None = None
         self.u_max: np.ndarray | None = None
+        self.use_u_rate_constraints: bool = False
+        self.u_prev: ca.Opti.parameter | None = None  # previous control input
         self.u_rate_min: np.ndarray | None = None
         self.u_rate_max: np.ndarray | None = None
         self.u_tot_max: float | None = None  # maximum total control input
