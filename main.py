@@ -13,11 +13,11 @@ from braid_controller.visualization.colors import CmdColors
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m3_spacelab.yaml"  # topological specification
+DATA = "data/grids_m3_spacelab_2.yaml"  # topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
-COLLISION_AVOIDANCE = "nonconvex"  # {convex, nonconvex}
+COLLISION_AVOIDANCE = "convex"  # {convex, nonconvex}
 SLACK_CONSTRAINTS_COLL = True  # recommended if line above is "nonconvex"
-SLACK_CONSTRAINTS_STATE = False
+SLACK_CONSTRAINTS_STATE = True
 USE_ROBOTARIUM = False  # otherwise, dynamics from the agents' objects is used
 SHOW_PLOTS = True
 DEBUG = True
@@ -33,15 +33,15 @@ PROGRESS_STRATEGY = "winding_progress"
 PROGRESS_STRATEGY_DISTRIBUTED = "median"
 
 # Simulation and controller's properties
-DT: float = 0.1  # s
+DT: float = 0.1  #
 K: int = 20  # time steps
-T: float = 180  # total simulation time (s)
+T: float = 36  # total simulation time (s)
 
 # Cost function weights
 D_MIN: float = 0.7  # minimum distance between agents
-ALPHA_U: float = 0.5  # control cost (constant).
+ALPHA_U: float = 0.1  # control cost (constant).
 ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
-ALPHA_W: float = 5  # scaling factor for winding cost; use 0 to disable
+ALPHA_W: float = 10  # scaling factor for winding cost; use 0 to disable
 COEFF_SHARPNESS: float = 20  # sharpness of sigmoid function for time-varying weights
 COEFF_CENTER: float = 0.9  # center of sigmoid function for time-varying weights [0,1]
 USE_TIME_VARYING_WEIGHTS: bool = True  # whether to use time-varying weights for g and w
