@@ -38,6 +38,7 @@ K: int = 20  # time steps
 T: float = 180  # total simulation time (s)
 
 # Cost function weights
+D_MIN: float = 0.7  # minimum distance between agents
 ALPHA_U: float = 0.5  # control cost (constant).
 ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
 ALPHA_W: float = 5  # scaling factor for winding cost; use 0 to disable
@@ -117,7 +118,7 @@ mpc.slack_state_constraints = SLACK_CONSTRAINTS_STATE
 mpc.use_u_rate_constraints = True
 mpc.alpha_u = ALPHA_U  # constant (in general)
 mpc.w_epsilon = None
-mpc.d_min = 0.7
+mpc.d_min = D_MIN
 mpc.x_min = np.array([data["x_lims"][0], data["y_lims"][0]])
 mpc.x_max = np.array([data["x_lims"][1], data["y_lims"][1]])
 if USE_ROBOTARIUM is True:
