@@ -13,7 +13,7 @@ from braid_controller.visualization.colors import CmdColors
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m3_spacelab_2.yaml"  # topological specification
+DATA = "data/grids_m3_spacelab_5.yaml"  # topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 COLLISION_AVOIDANCE = "convex"  # {convex, nonconvex}
 SLACK_CONSTRAINTS_COLL = True  # recommended if line above is "nonconvex"
