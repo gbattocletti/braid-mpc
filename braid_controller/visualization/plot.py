@@ -7,6 +7,17 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 
 
+def _tab10_colors(m: int) -> list:
+    """
+    Return the first m colors of the tab10 sequence. Ensures compatibility with
+    different versions of matplotlib.
+    """
+    try:
+        return plt.color_sequences["tab10"][:m]  # matplotlib >= 3.6
+    except AttributeError:
+        return plt.get_cmap("tab10").colors[:m]  # older versions
+
+
 def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     """
     Plot a list of paths in 2D space.
@@ -45,7 +56,7 @@ def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     _, _, m = paths.shape
 
     # Create the plot
-    colors = plt.color_sequences["tab10"][:m]
+    colors = _tab10_colors(m)
     fig, ax = plt.subplots(figsize=figsize / 2.54)
     for i in range(m):
         x = paths[:, 0, i]
@@ -130,7 +141,9 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     n, _, m = paths.shape  # Extract dimensions
     if time is None:
         time = np.arange(n)  # Create time array for z-axis
-    colors = plt.color_sequences["tab10"][:m]  # Define colormaps
+
+    # Define colormaps
+    colors = _tab10_colors(m)
 
     # Normalize space to mxm square for consistent visualization
     if normalize:
@@ -150,9 +163,17 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     ax.set_xlim(x_lims)
     ax.set_ylim(y_lims)
     ax.set_zlim(0, time[-1])
-    # ax.set_box_aspect([1, 1, 1.7])  # ax.set_aspect("equalxy")
-    ax.set_aspect("equalxy")
-    ax.view_init(elev=pov[0], azim=pov[1], roll=pov[2])
+    try:
+        ax.set_aspect("equalxy")
+    except (ValueError, NotImplementedError):
+        xr = x_lims[1] - x_lims[0]
+        yr = y_lims[1] - y_lims[0]
+        ax.set_box_aspect((xr, yr, 2))
+        # Alternative: ax.set_box_aspect([1, 1, 2])
+    try:
+        ax.view_init(elev=pov[0], azim=pov[1], roll=pov[2])  # matplotlib >= 3.6
+    except TypeError:
+        ax.view_init(elev=pov[0], azim=pov[1])
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("t")
@@ -218,7 +239,7 @@ def plot_windings(
     _, m, _ = windings.shape
 
     # Define colormaps
-    colors = plt.color_sequences["tab10"][:m]  # Define colormaps
+    colors = _tab10_colors(m)
 
     # Create the plot
     plot_cols = 3
@@ -321,7 +342,7 @@ def plot_cost(
 
     # Initialize colormap
     _, _, m = cost.shape
-    colors = plt.color_sequences["tab10"][:m]
+    colors = _tab10_colors(m)
 
     # Create the plot
     fig: plt.Figure
@@ -416,7 +437,7 @@ def plot_tau(
     m = tau_i.shape[1] if tau_i is not None else 0
 
     # Define colormaps
-    colors = plt.color_sequences["tab10"][:m]
+    colors = _tab10_colors(m)
 
     # Create the plot
     fig, ax = plt.subplots(figsize=figsize / 2.54)

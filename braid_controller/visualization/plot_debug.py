@@ -204,8 +204,11 @@ def plot_hyperplanes(mpc: DistributedMPC, **kwargs) -> tuple[plt.Figure, plt.Axe
         xlim = (float(all_pos[:, 0].min() - pad), float(all_pos[:, 0].max() + pad))
         ylim = (float(all_pos[:, 1].min() - pad), float(all_pos[:, 1].max() + pad))
 
-    # Define colormap
-    colors = plt.color_sequences["tab10"][:m]  # color 0 for ego, 1: for others
+    # Define colormap (color 0 for ego, 1: for others)
+    try:
+        colors = plt.color_sequences["tab10"][:m]
+    except AttributeError:
+        colors = plt.get_cmap("tab10").colors[:m]
 
     # Initialize figure and axes
     fig, ax = plt.subplots(figsize=figsize / 2.54)

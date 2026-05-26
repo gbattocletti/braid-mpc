@@ -220,7 +220,10 @@ if USE_ROBOTARIUM is True:
     v_vec = np.zeros((mpc.n_u, m))
 
     # Plot relevant information
-    colors = plt.color_sequences["tab10"][:m]
+    try:
+        colors = plt.color_sequences["tab10"][:m]
+    except AttributeError:
+        colors = plt.get_cmap("tab10").colors[:m]
     rect = patches.Rectangle(
         (-1.6, -1), 2, 2, linewidth=2, edgecolor="black", facecolor="none"
     )
@@ -370,7 +373,7 @@ for step, t in enumerate(time):
         raise ValueError(f"Invalid progress strategy: {PROGRESS_STRATEGY}")
 
     # Compute target winding numbers from tau_target
-    w_target = windings_target[np.astype(tau_target * (n_windings - 1), int), :, :]
+    w_target = windings_target[(tau_target * (n_windings - 1)).astype(int), :, :]
     w_target_resampled[step, :, :] = w_target[-1, :, :]  # save target w at K+1 for plot
 
     # 2. Solve MPC problem
