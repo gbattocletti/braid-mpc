@@ -71,8 +71,8 @@ class DistributedMPC(MPC):
             self.s_coll = self.ocp.variable(self.m - 1, self.K + 1)
         if self.slack_state_constraints is True:
             self.s_state = self.ocp.variable(self.K + 1, self.n_x_pos)
-        self.alpha_s_1 = 1e3
-        self.alpha_s_2 = 1e3
+        self.alpha_s_1 = 1e6
+        self.alpha_s_2 = 1e6
 
         # Initialize OCP parameters
         # NOTE: in the distributed case, the list of predicted states of the agents,
