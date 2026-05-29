@@ -13,7 +13,7 @@ from braid_controller.visualization.colors import CmdColors
 ## Settings ############################################################################
 
 # User-defined settings
-DATA = "data/grids_m3_spacelab_t2b.yaml"  # topological specification
+DATA = "data/grids_m3_spacelab_t6.yaml"  # topological specification
 CONTROL_ARCHITECTURE = "distributed"  # "distributed" or "centralized"
 COLLISION_AVOIDANCE = "convex"  # {convex, nonconvex}
 SLACK_CONSTRAINTS_COLL = True  # recommended if line above is "nonconvex"
@@ -30,17 +30,17 @@ DEBUG_HYPERPLANES = False  # whether to plot the hyperplanes and stop the simula
 # In case of distributed control, an additional selection can be made to determine the
 #  selection of tau from individual estimates. Can be "mean", "min", or "median".
 PROGRESS_STRATEGY = "winding_progress"
-PROGRESS_STRATEGY_DISTRIBUTED = "median"
+PROGRESS_STRATEGY_DISTRIBUTED = "mean"
 
 # Simulation and controller's properties
-DT: float = 0.1  #
+DT: float = 0.25  #
 K: int = 21  # time steps
 T: float = 30  # total simulation time (s)
 
 # Cost function weights
 D_MIN: float = 0.7  # minimum distance between agents
-ALPHA_U: float = 0.1  # control cost (constant).
-ALPHA_G: float = 0.1  # scaling factor for goal tracking cost; use 0 to disable
+ALPHA_U: float = 0.05  # control cost (constant).
+ALPHA_G: float = 1  # scaling factor for goal tracking cost; use 0 to disable
 ALPHA_W: float = 20  # scaling factor for winding cost; use 0 to disable
 COEFF_SHARPNESS: float = 20  # sharpness of sigmoid function for time-varying weights
 COEFF_CENTER: float = 0.9  # center of sigmoid function for time-varying weights [0,1]
