@@ -340,7 +340,7 @@ for step, t in enumerate(time):
                     w_measured=w_curr,
                     w_reference=windings_target,
                     tau_prev=tau,
-                    delta_tau_max=delta_tau_K,
+                    delta_tau_max=delta_tau_max,
                     weights=alpha_w,
                 )
             if PROGRESS_STRATEGY_DISTRIBUTED == "min":
@@ -361,7 +361,7 @@ for step, t in enumerate(time):
                 w_measured=w_curr,
                 w_reference=windings_target,
                 tau_prev=tau,
-                delta_tau_max=delta_tau_K,
+                delta_tau_max=delta_tau_max,
                 weights=alpha_w,
             )
         tau_mat[step] = tau  # save tau for plotting
