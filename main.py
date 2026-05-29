@@ -345,6 +345,8 @@ for step, t in enumerate(time):
                 )
             if PROGRESS_STRATEGY_DISTRIBUTED == "min":
                 tau = np.min(tau_i)
+            if PROGRESS_STRATEGY_DISTRIBUTED == "max":
+                tau = np.max(tau_i)
             elif PROGRESS_STRATEGY_DISTRIBUTED == "mean":
                 tau = np.mean(tau_i)
             elif PROGRESS_STRATEGY_DISTRIBUTED == "median":
