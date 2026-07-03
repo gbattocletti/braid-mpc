@@ -4,6 +4,7 @@ import numpy as np
 
 from braid_controller.core import agent, mpc_centralized, mpc_distributed
 from braid_controller.utils import geometry, invariants, io, weights
+from braid_controller.utils.grid_controller import grid_controller
 from braid_controller.visualization import plot
 
 ## Settings ############################################################################
@@ -14,8 +15,8 @@ experiments = [
 ]
 
 controllers = [
-    "distributed",
-    "centralized",
+    # "distributed",
+    # "centralized",
     "grid",
 ]
 
@@ -31,9 +32,10 @@ alpha_g: float = 1  # scaling factor for goal tracking cost
 alpha_w: float = 20  # scaling factor for winding cost
 coeff_s: float = 20  # sharpness of sigmoid function for time-varying weights
 coeff_c: float = 0.9  # center of sigmoid function for time-varying weights [0,1]
-u_max = np.array([0.5, 0.5])  # maximum control input (m/s)
-v_max = np.linalg.norm(u_max)  # maximum speed (m/s)
-u_rate_max = np.array([-0.15, -0.15]) * dt  # max velocity change in dt (a * dt)
+u_max: np.ndarray = np.array([0.5, 0.5])  # maximum control input (m/s)
+v_max: float = np.linalg.norm(u_max)  # maximum speed (m/s)
+a_max: np.ndarray = np.array([0.15, 0.15])  # max acceleration (m/s^2)
+u_rate_max: np.ndarray = np.array([0.15, 0.15]) * dt  # max velocity (a * dt)
 
 ## Preprocessing #######################################################################
 np.random.seed(1312)  # Set random seed for reproducibility
@@ -55,14 +57,16 @@ for experiment in experiments:
     m: int = data["m"]
     M = [agent.Agent(i) for i in range(m)]
 
-    # Check initial and final positions
+    # Check initial and final positions (dummy heading added to get correct dimension)
     x_init: np.ndarray = np.array(data["x_init"]).T
     x_goal: np.ndarray = np.array(data["x_goal"]).T
+    x_init = np.vstack([x_init, np.zeros([1, m])]) if x_init.shape[0] == 2 else x_init
+    x_goal = np.vstack([x_goal, np.zeros([1, m])]) if x_goal.shape[0] == 2 else x_goal
     if not geometry.check_positions(
         x_init,
         d_min=d_min,
         dynamics="single_integrator",
-        u_max=u_max,
+        u_max=np.array([u_max]),
         dt=dt,
         verbose=False,
     ):
@@ -73,7 +77,7 @@ for experiment in experiments:
         x_goal,
         d_min=d_min,
         dynamics="single_integrator",
-        u_max=u_max,
+        u_max=np.array([u_max]),
         dt=dt,
         verbose=False,
     ):
@@ -231,6 +235,7 @@ for experiment in experiments:
                     M[i].x_opt = x_opt[i]
                     M[i].cost = cost
                     M[i].t_sol = t_sol
+                    t_sol_mat[step, i] = t_sol
                 _, cost_g, cost_u, cost_w = mpc.check_cost()
                 cost_mat[step, 0, :] = cost
                 cost_mat[step, 1, :] = cost_g
@@ -273,7 +278,7 @@ for experiment in experiments:
             fig_cost, _ = plot.plot_cost(cost_mat, time)
             fig_w_target, _ = plot.plot_windings(w_target, range(w_target.shape[0]))
             fig_w_curr, _ = plot.plot_windings(w_curr_mat, time)
-            fig_tau, _ = plot.plot_tau(tau_mat, time, show=False)
+            fig_tau, _ = plot.plot_tau(tau_mat, time)
             fig_paths.savefig(os.path.join(output_dir, "c_paths.png"), dpi=900)
             fig_cost.savefig(os.path.join(output_dir, "c_cost.png"), dpi=900)
             fig_w_target.savefig(os.path.join(output_dir, "c_w_target.png"), dpi=900)
@@ -382,6 +387,7 @@ for experiment in experiments:
                     M[i].x_opt = x_opt
                     M[i].cost = cost
                     M[i].t_sol = t_sol
+                    t_sol_mat[step, :] = t_sol
                     _, cost_g, cost_u, cost_w = mpc.check_cost()
                     cost_mat[step, 0, i] = cost
                     cost_mat[step, 1, i] = cost_g
@@ -433,13 +439,86 @@ for experiment in experiments:
             fig_tau.savefig(os.path.join(output_dir, "c_tau.png"), dpi=900)
 
         elif controller == "grid":
+
             # Initialize grid controller
-            grid = np.arange(0, K + 1)  # TODO: implement grid controller
+            side_x = data["x_lims"][1] - data["x_lims"][0]
+            side_y = data["y_lims"][1] - data["y_lims"][0]
+            d_x = side_x / m
+            d_y = side_y / m
+            if d_x < d_min or d_y < d_min:
+                raise ValueError(
+                    "Grid spacing is too small for collision avoidance. "
+                    "Increase the area or reduce the number of agents."
+                )
+            grid_points_x = np.arange(d_x / 2, side_x, d_x)
+            grid_points_y = np.arange(d_y / 2, side_y, d_y)
 
             # Run control loop
+            grid_gen_idx: int = 0
+            targets: np.ndarray = np.zeros((m, 2))
+            move_to_goal: bool = False
             for step, t in enumerate(time):
-                # TODO
-                for i in range(m):
-                    M[i].step(M[i].u_opt[0])
 
-            # TODO save data
+                # Select target
+                if move_to_goal is False:
+                    for i in range(m):
+                        row, col = np.where(grids[grid_gen_idx] == i + 1)
+                        targets[i, :] = np.array(
+                            [
+                                grid_points_x[row][
+                                    0
+                                ],  # CHECKME is row and col correct?
+                                grid_points_y[col][0],
+                            ]
+                        )
+                else:
+                    for i in range(m):
+                        targets[i, :] = x_goal[i, :]  # use goal as next target
+                tau_mat[step] = np.max([0, grid_gen_idx - 1]) / n_generators_grid
+
+                # Plan motion for each robot
+                for i in range(m):
+                    x_opt, u_opt, cost, t_sol = grid_controller(
+                        x_curr=M[i].x[:2],
+                        x_goal=targets[i, :],
+                        K=K,
+                        dt=dt,
+                        v_max=u_max,
+                        a_max=a_max,
+                    )
+                    M[i].step(u_opt[:, 0])
+                    t_sol_mat[step, i] = t_sol
+                    cost_mat[step, :, i] = cost
+                    trajectories[step, :, i] = M[i].x[:2]
+
+                    # Advance progress if agent is close enough to target
+                    x_all = np.array([M[i].x for i in range(m)])
+                    distances = np.linalg.norm(x_all - targets, axis=-1)
+                    if np.all(distances < 0.1):
+                        if grid_gen_idx < n_generators_grid - 1:
+                            grid_gen_idx += 1  # move to next index
+                        else:
+                            move_to_goal = True
+
+            # Print computation time stats
+            t_sol_avg = np.mean(t_sol_mat, axis=0)
+            t_sol_std = np.std(t_sol_mat, axis=0)
+            t_sol_max = np.max(t_sol_mat, axis=0)
+            print("Grid controller -- Solution Times:")
+            for i in range(m):
+                print(
+                    f"\tAgent {i}: {t_sol_avg[i]:.2f}s (std: {t_sol_std[i]:.2f}s, "
+                    f"max: {t_sol_max[i]:.2f}s)"
+                )
+
+            # Generate and save plots
+            fig_paths, _ = plot.plot_paths_3d(
+                trajectories[:, :2, :],
+                time=time,
+                x_lims=np.array(data["x_lims"]),
+                y_lims=np.array(data["y_lims"]),
+                normalize=False,
+            )
+            fig_tau, _ = plot.plot_tau(tau_mat, time)
+            fig_paths.savefig(os.path.join(output_dir, "g_paths.png"), dpi=900)
+            fig_tau.savefig(os.path.join(output_dir, "g_tau.png"), dpi=900)
