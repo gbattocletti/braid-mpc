@@ -12,6 +12,8 @@ wheels/
 
 # Dev files
 .dev
+matlab-tests
+results
 
 # Vscode folder
 .vscode
