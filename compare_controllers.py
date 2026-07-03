@@ -1,5 +1,6 @@
 import os
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from braid_controller.core import agent, mpc_centralized, mpc_distributed
@@ -22,8 +23,8 @@ controllers = [
 
 # Simulation and controller's properties
 dt: float = 0.25  # time step
+t_end: float = 1000  # total simulation time (s) NOTE: way larger than actually needed
 K: int = 21  # MPC horizon
-t_end: float = 30  # total simulation time (s)
 
 # Cost function weights
 d_min: float = 0.7  # minimum distance between agents
@@ -34,7 +35,6 @@ coeff_s: float = 20  # sharpness of sigmoid function for time-varying weights
 coeff_c: float = 0.9  # center of sigmoid function for time-varying weights [0,1]
 u_max: np.ndarray = np.array([0.5, 0.5])  # maximum control input (m/s)
 v_max: float = np.linalg.norm(u_max)  # maximum speed (m/s)
-a_max: np.ndarray = np.array([0.15, 0.15])  # max acceleration (m/s^2)
 u_rate_max: np.ndarray = np.array([0.15, 0.15]) * dt  # max velocity (a * dt)
 
 ## Preprocessing #######################################################################
@@ -104,8 +104,19 @@ for experiment in experiments:
             paths = invariants.grids2paths(grids)
             plot_grid_spec_3d, _ = plot.plot_paths_3d(
                 paths,
-                normalize=True,
-                show=False,
+                x_lims=np.array(
+                    [
+                        data["x_lims"][0] - 1,
+                        data["x_lims"][1] + 1,
+                    ]
+                ),
+                y_lims=np.array(
+                    [
+                        data["y_lims"][0] - 1,
+                        data["y_lims"][1] + 1,
+                    ]
+                ),
+                normalize=False,
             )
             w_target = invariants.paths2windings(
                 paths,
@@ -114,9 +125,6 @@ for experiment in experiments:
             )
             n_windings = w_target.shape[0]
             n_generators = n_generators_grid
-
-    # Initialize time
-    time: np.ndarray = np.arange(0, t_end + dt, dt)
 
     # Iterate over controllers and run simulations
     for controller in controllers:
@@ -147,6 +155,9 @@ for experiment in experiments:
         delta_tau_K: float = K * delta_tau  # max change in tau over one MPC horizon
 
         # Initialize matrices to save data for plotting
+        goal_reached: bool = False
+        step: int = 0
+        time: np.ndarray = np.arange(0, t_end + dt, dt)
         trajectories: np.ndarray = np.zeros((len(time), 2, m))
         cost_mat: np.ndarray = np.zeros((len(time), 4, m))
         tau_mat: np.ndarray = np.zeros(len(time))
@@ -180,7 +191,7 @@ for experiment in experiments:
             x_prev = None
 
             # Run control loop
-            for step, t in enumerate(time):
+            while goal_reached is False:
 
                 # 1. Update time-varying weights based on tau
                 alpha_g_k = alpha_g * weights.sigmoid(
@@ -257,11 +268,34 @@ for experiment in experiments:
                 w_curr_mat[step, :, :] = w_curr
                 theta_prev = theta
 
+                # 6. Check if sim is completed or move to next time step
+                if tau > 0.9 and np.all(
+                    np.linalg.norm(
+                        np.array([M[i].x[:2] for i in range(m)]) - x_goal[:2, :].T,
+                        axis=-1,
+                    )
+                    < 0.1
+                ):
+                    goal_reached = True
+                else:
+                    step += 1
+
+            # Cut matrices to correct length
+            time = time[:step]
+            trajectories = trajectories[:step, :, :]
+            cost_mat = cost_mat[:step, :, :]
+            tau_mat = tau_mat[:step]
+            w_curr_mat = w_curr_mat[:step, :, :]
+            w_target_mat = w_target_mat[:step, :, :]
+            t_sol_mat = t_sol_mat[:step, :]
+
             # Print computation time stats
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
             t_sol_max = np.max(t_sol_mat, axis=0)
-            print("Centralized MPC -- Solution Times:")
+            print("Centralized MPC")
+            print(f"\tTotal time: {time[-1]}")
+            print("Solution Times:")
             print(
                 f"\t{t_sol_avg[0]:.2f}s "
                 f"(std: {t_sol_std[0]:.2f}s, max: {t_sol_max[0]:.2f}s)"
@@ -314,7 +348,7 @@ for experiment in experiments:
             tau_i_mat: np.ndarray = np.zeros((len(time), m))
 
             # Run control loop
-            for step, t in enumerate(time):
+            while goal_reached is False:
 
                 # 1. Update time-varying weights based on tau
                 alpha_g_k = alpha_g * weights.sigmoid(
@@ -409,11 +443,34 @@ for experiment in experiments:
                 w_curr_mat[step, :, :] = w_curr
                 theta_prev = theta
 
+                # 6. Check if sim is completed or move to next time step
+                if tau > 0.9 and np.all(
+                    np.linalg.norm(
+                        np.array([M[i].x[:2] for i in range(m)]) - x_goal[:2, :].T,
+                        axis=-1,
+                    )
+                    < 0.1
+                ):
+                    goal_reached = True
+                else:
+                    step += 1
+
+            # Cut matrices to correct length
+            time = time[:step]
+            trajectories = trajectories[:step, :, :]
+            cost_mat = cost_mat[:step, :, :]
+            tau_mat = tau_mat[:step]
+            w_curr_mat = w_curr_mat[:step, :, :]
+            w_target_mat = w_target_mat[:step, :, :]
+            t_sol_mat = t_sol_mat[:step, :]
+
             # Print computation time stats
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
             t_sol_max = np.max(t_sol_mat, axis=0)
-            print("Distributed MPC -- Solution Times:")
+            print("Distributed MPC")
+            print(f"\tTotal time: {time[-1]}")
+            print("Solution Times:")
             for i in range(m):
                 print(
                     f"\tAgent {i}: {t_sol_avg[i]:.2f}s (std: {t_sol_std[i]:.2f}s, "
@@ -457,7 +514,7 @@ for experiment in experiments:
             grid_gen_idx: int = 0
             targets: np.ndarray = np.zeros((m, 2))
             move_to_goal: bool = False
-            for step, t in enumerate(time):
+            while goal_reached is False:
 
                 # Select target
                 if move_to_goal is False:
@@ -465,15 +522,13 @@ for experiment in experiments:
                         row, col = np.where(grids[grid_gen_idx] == i + 1)
                         targets[i, :] = np.array(
                             [
-                                grid_points_x[row][
-                                    0
-                                ],  # CHECKME is row and col correct?
-                                grid_points_y[col][0],
-                            ]
+                                grid_points_x[col][0],
+                                grid_points_y[row][0],
+                            ]  # CHECKME is row and col correct?
                         )
                 else:
                     for i in range(m):
-                        targets[i, :] = x_goal[i, :]  # use goal as next target
+                        targets[i, :] = x_goal[:2, i]  # use goal as next target
                 tau_mat[step] = np.max([0, grid_gen_idx - 1]) / n_generators_grid
 
                 # Plan motion for each robot
@@ -484,7 +539,7 @@ for experiment in experiments:
                         K=K,
                         dt=dt,
                         v_max=u_max,
-                        a_max=a_max,
+                        a_max=u_rate_max,
                     )
                     M[i].step(u_opt[:, 0])
                     t_sol_mat[step, i] = t_sol
@@ -492,7 +547,7 @@ for experiment in experiments:
                     trajectories[step, :, i] = M[i].x[:2]
 
                     # Advance progress if agent is close enough to target
-                    x_all = np.array([M[i].x for i in range(m)])
+                    x_all = np.array([M[i].x[:2] for i in range(m)])
                     distances = np.linalg.norm(x_all - targets, axis=-1)
                     if np.all(distances < 0.1):
                         if grid_gen_idx < n_generators_grid - 1:
@@ -500,11 +555,34 @@ for experiment in experiments:
                         else:
                             move_to_goal = True
 
+                # 6. Check if sim is completed or move to next time step
+                if move_to_goal is True and np.all(
+                    np.linalg.norm(
+                        np.array([M[i].x[:2] for i in range(m)]) - x_goal[:2, :].T,
+                        axis=-1,
+                    )
+                    < 0.1
+                ):
+                    goal_reached = True
+                else:
+                    step += 1
+
+            # Cut matrices to correct length
+            time = time[:step]
+            trajectories = trajectories[:step, :, :]
+            cost_mat = cost_mat[:step, :, :]
+            tau_mat = tau_mat[:step]
+            w_curr_mat = w_curr_mat[:step, :, :]
+            w_target_mat = w_target_mat[:step, :, :]
+            t_sol_mat = t_sol_mat[:step, :]
+
             # Print computation time stats
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
             t_sol_max = np.max(t_sol_mat, axis=0)
-            print("Grid controller -- Solution Times:")
+            print("Grid Controller")
+            print(f"\tTotal time: {time[-1]}")
+            print("Solution Times:")
             for i in range(m):
                 print(
                     f"\tAgent {i}: {t_sol_avg[i]:.2f}s (std: {t_sol_std[i]:.2f}s, "
@@ -515,10 +593,19 @@ for experiment in experiments:
             fig_paths, _ = plot.plot_paths_3d(
                 trajectories[:, :2, :],
                 time=time,
-                x_lims=np.array(data["x_lims"]),
-                y_lims=np.array(data["y_lims"]),
+                x_lims=np.array(
+                    [
+                        data["x_lims"][0] - 1,
+                        data["x_lims"][1] + 1,
+                    ]
+                ),
+                y_lims=np.array(
+                    [
+                        data["y_lims"][0] - 1,
+                        data["y_lims"][1] + 1,
+                    ]
+                ),
                 normalize=False,
             )
-            fig_tau, _ = plot.plot_tau(tau_mat, time)
+            plt.show()
             fig_paths.savefig(os.path.join(output_dir, "g_paths.png"), dpi=900)
-            fig_tau.savefig(os.path.join(output_dir, "g_tau.png"), dpi=900)
