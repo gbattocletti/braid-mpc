@@ -42,7 +42,6 @@ alpha_w: float = 20  # scaling factor for winding cost
 coeff_s: float = 20  # sharpness of sigmoid function for time-varying weights
 coeff_c: float = 0.9  # center of sigmoid function for time-varying weights [0,1]
 u_max: np.ndarray = np.array([0.5, 0.5])  # maximum control input (m/s)
-v_max: float = np.linalg.norm(u_max)  # maximum speed (m/s)
 u_rate_max: np.ndarray = np.array([0.15, 0.15]) * dt  # max velocity change (a * dt)
 
 ## Preprocessing #######################################################################
@@ -52,7 +51,8 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))  # Move to script directory
 for experiment in experiments:
 
     # Print experiment info
-    print(f"\nRunning experiment: {experiment}")
+    print("####################################################################")
+    print(f"Running experiment: {experiment}")
 
     # Load input data
     data: dict = io.load_yaml("data/" + experiment)
@@ -138,7 +138,7 @@ for experiment in experiments:
     for controller in controllers:
 
         # Print start of control loop
-        print(f"> Running {controller} controller.")
+        print(f"\nRunning {controller} controller.")
 
         # Reset agents after previous simulation
         for i in range(m):
@@ -162,7 +162,9 @@ for experiment in experiments:
         theta_prev: np.ndarray = invariants.relative_headings(x_init)
         w_curr: np.ndarray = np.zeros((m, m))
         tau: float = 0
-        delta_tau: float = 2 / (n_generators * np.pi) * np.arcsin(v_max * dt / d_min)
+        delta_tau: float = (
+            2 / (n_generators * np.pi) * np.arcsin(np.linalg.norm(u_max) * dt / d_min)
+        )
         delta_tau_K: float = K * delta_tau  # max change in tau over one MPC horizon
 
         # Initialize matrices to save data for plotting
@@ -270,7 +272,7 @@ for experiment in experiments:
                 # 4. Execute control action
                 for i in range(m):
                     M[i].step(M[i].u_opt[0])
-                    trajectories[step, :, i] = M[i].x
+                    trajectories[step, :, i] = M[i].x[:2]
 
                 # 5. Update current winding numbers
                 theta = invariants.relative_headings(
@@ -323,6 +325,32 @@ for experiment in experiments:
                     f"Average time: {t_sol_avg[0]:.4f}s "
                     f"(std: {t_sol_std[0]:.4f}s, max: {t_sol_max[0]:.4f}s)"
                 )
+            np.savez(
+                os.path.join(output_dir, "c_data.txt"),
+                dt=dt,
+                K=K,
+                m=m,
+                d_min=d_min,
+                alpha_u=alpha_u,
+                alpha_g=alpha_g,
+                alpha_w=alpha_w,
+                coeff_s=coeff_s,
+                coeff_c=coeff_c,
+                u_max=u_max,
+                u_rate_max=u_rate_max,
+                x_init=x_init,
+                x_goal=x_goal,
+                x_lim=data["x_lims"],
+                y_lim=data["y_lims"],
+                w_target=w_target_full,
+                time=time,
+                trajectories=trajectories,
+                cost_mat=cost_mat,
+                tau_mat=tau_mat,
+                w_curr_mat=w_curr_mat,
+                w_target_mat=w_target_mat,
+                t_sol_mat=t_sol_mat,
+            )
 
             # Generate and save plots
             fig_paths, _ = plot.plot_paths_3d(
@@ -518,6 +546,33 @@ for experiment in experiments:
                     f"Global average: {np.mean(t_sol_mat)} (std: {np.std(t_sol_mat)})"
                 )
                 f.write(f"Global max: {np.max(t_sol_mat)}")
+            np.savez(
+                os.path.join(output_dir, "d_data.txt"),
+                dt=dt,
+                K=K,
+                m=m,
+                d_min=d_min,
+                alpha_u=alpha_u,
+                alpha_g=alpha_g,
+                alpha_w=alpha_w,
+                coeff_s=coeff_s,
+                coeff_c=coeff_c,
+                u_max=u_max,
+                u_rate_max=u_rate_max,
+                x_init=x_init,
+                x_goal=x_goal,
+                x_lim=data["x_lims"],
+                y_lim=data["y_lims"],
+                w_target=w_target_full,
+                time=time,
+                trajectories=trajectories,
+                cost_mat=cost_mat,
+                tau_mat=tau_mat,
+                tau_i_mat=tau_i_mat,
+                w_curr_mat=w_curr_mat,
+                w_target_mat=w_target_mat,
+                t_sol_mat=t_sol_mat,
+            )
 
             # Generate and save plots
             fig_paths, _ = plot.plot_paths_3d(
@@ -654,6 +709,32 @@ for experiment in experiments:
                     f"Global average: {np.mean(t_sol_mat)} (std: {np.std(t_sol_mat)})"
                 )
                 f.write(f"Global max: {np.max(t_sol_mat)}")
+            np.savez(
+                os.path.join(output_dir, "d_data.txt"),
+                dt=dt,
+                K=K,
+                m=m,
+                d_min=d_min,
+                alpha_u=alpha_u,
+                alpha_g=alpha_g,
+                alpha_w=alpha_w,
+                coeff_s=coeff_s,
+                coeff_c=coeff_c,
+                u_max=u_max,
+                u_rate_max=u_rate_max,
+                x_init=x_init,
+                x_goal=x_goal,
+                x_lim=data["x_lims"],
+                y_lim=data["y_lims"],
+                w_target=w_target_full,
+                time=time,
+                trajectories=trajectories,
+                cost_mat=cost_mat,
+                tau_mat=tau_mat,
+                w_curr_mat=w_curr_mat,
+                w_target_mat=w_target_mat,
+                t_sol_mat=t_sol_mat,
+            )
 
             # Generate and save plots
             fig_paths, _ = plot.plot_paths_3d(
