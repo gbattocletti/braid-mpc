@@ -1,6 +1,5 @@
 import os
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from braid_controller.core import agent, mpc_centralized, mpc_distributed
@@ -13,20 +12,20 @@ from braid_controller.visualization import plot
 # User-defined settings
 experiments = [
     "grids_m3_1.yaml",
-    "grids_m5_1.yaml",
-    "grids_m5_2.yaml",
-    "grids_m10_1.yaml",
-    "grids_m10_2.yaml",
-    "grids_m10_3.yaml",
-    "grids_m10_4.yaml",
-    "grids_m10_5.yaml",
-    "grids_m10_6.yaml",
+    # "grids_m5_1.yaml",
+    # "grids_m5_2.yaml",
+    # "grids_m10_1.yaml",
+    # "grids_m10_2.yaml",
+    # "grids_m10_3.yaml",
+    # "grids_m10_4.yaml",
+    # "grids_m10_5.yaml",
+    # "grids_m10_6.yaml",
 ]
 
 controllers = [
     # "distributed",
-    "centralized",
-    # "grid",
+    # "centralized",
+    "grid",
 ]
 
 # Simulation and controller's properties
@@ -173,6 +172,7 @@ for experiment in experiments:
         time: np.ndarray = np.arange(0, t_end + dt, dt)
         n_time: int = len(time)
         trajectories: np.ndarray = np.zeros((len(time), 2, m))
+        actuation: np.ndarray = np.zeros((len(time), 2, m))
         cost_mat: np.ndarray = np.zeros((len(time), 4, m))
         tau_mat: np.ndarray = np.zeros(len(time))
         w_curr_mat: np.ndarray = np.zeros((len(time), m, m))
@@ -273,6 +273,7 @@ for experiment in experiments:
                 for i in range(m):
                     M[i].step(M[i].u_opt[0])
                     trajectories[step, :, i] = M[i].x[:2]
+                    actuation[step, :, i] = M[i].u_opt[0] * dt
 
                 # 5. Update current winding numbers
                 theta = invariants.relative_headings(
@@ -305,7 +306,7 @@ for experiment in experiments:
             w_target_mat = w_target_mat[:step, :, :]
             t_sol_mat = t_sol_mat[:step, :]
 
-            # Print computation time stats
+            # Compute stats
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
             t_sol_max = np.max(t_sol_mat, axis=0)
@@ -318,6 +319,13 @@ for experiment in experiments:
             traj_std = np.std(traj_len)
             traj_min = np.min(traj_len)
             traj_max = np.max(traj_len)
+            force = np.linalg.norm(actuation * dt, axis=1)
+            force_max = np.max(force)
+            force_mean = np.mean(force)
+            force_std = np.std(force)
+            force_tot = np.sum(force)
+
+            # Print & save stats
             print("Centralized MPC")
             print(f"\tTotal time: {time[-1]}")
             print("Solution Times:")
@@ -342,6 +350,10 @@ for experiment in experiments:
                     f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
                     f"({traj_min:.4f} -- {traj_max:.4f})"
                 )
+                f.write(
+                    f"Force: {force_mean:.4f} +- {force_std:.4f}"
+                    f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
+                )
             np.savez(
                 os.path.join(output_dir, "c_data.txt"),
                 dt=dt,
@@ -362,6 +374,7 @@ for experiment in experiments:
                 w_target=w_target_full,
                 time=time,
                 trajectories=trajectories,
+                actuation=actuation,
                 cost_mat=cost_mat,
                 tau_mat=tau_mat,
                 w_curr_mat=w_curr_mat,
@@ -504,6 +517,7 @@ for experiment in experiments:
                 for i in range(m):
                     M[i].step(M[i].u_opt[0])
                     trajectories[step, :, i] = M[i].x[:2]
+                    actuation[step, :, i] = M[i].u_opt[0] * dt
 
                 # 6. Update current winding numbers
                 theta = invariants.relative_headings(
@@ -537,7 +551,7 @@ for experiment in experiments:
             w_target_mat = w_target_mat[:step, :, :]
             t_sol_mat = t_sol_mat[:step, :]
 
-            # Print computation time stats
+            # Compute stats
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
             t_sol_max = np.max(t_sol_mat, axis=0)
@@ -550,6 +564,13 @@ for experiment in experiments:
             traj_std = np.std(traj_len)
             traj_min = np.min(traj_len)
             traj_max = np.max(traj_len)
+            force = np.linalg.norm(actuation * dt, axis=1)
+            force_max = np.max(force)
+            force_mean = np.mean(force)
+            force_std = np.std(force)
+            force_tot = np.sum(force)
+
+            # Print & save stats
             print("Distributed MPC")
             print(f"\tTotal time: {time[-1]}")
             print("Solution Times:")
@@ -580,6 +601,10 @@ for experiment in experiments:
                     f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
                     f"({traj_min:.4f} -- {traj_max:.4f})"
                 )
+                f.write(
+                    f"Force: {force_mean:.4f} +- {force_std:.4f}"
+                    f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
+                )
             np.savez(
                 os.path.join(output_dir, "d_data.txt"),
                 dt=dt,
@@ -600,6 +625,7 @@ for experiment in experiments:
                 w_target=w_target_full,
                 time=time,
                 trajectories=trajectories,
+                actuation=actuation,
                 cost_mat=cost_mat,
                 tau_mat=tau_mat,
                 tau_i_mat=tau_i_mat,
@@ -686,6 +712,7 @@ for experiment in experiments:
                 for i in range(m):
                     M[i].step(M[i].u_opt[:, 0])
                     trajectories[step, :, i] = M[i].x[:2]
+                    actuation[step, :, i] = M[i].u_opt[:, 0] * dt
 
                 # Advance progress if agent is close enough to target
                 x_all = np.array([M[i].x[:2] for i in range(m)])
@@ -717,7 +744,7 @@ for experiment in experiments:
             w_target_mat = w_target_mat[:step, :, :]
             t_sol_mat = t_sol_mat[:step, :]
 
-            # Print computation time stats
+            # Compute stats
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
             t_sol_max = np.max(t_sol_mat, axis=0)
@@ -730,6 +757,13 @@ for experiment in experiments:
             traj_std = np.std(traj_len)
             traj_min = np.min(traj_len)
             traj_max = np.max(traj_len)
+            force = np.linalg.norm(actuation * dt, axis=1)
+            force_max = np.max(force)
+            force_mean = np.mean(force)
+            force_std = np.std(force)
+            force_tot = np.sum(force)
+
+            # Print & save stats
             print("Grid Controller")
             print(f"\tTotal time: {time[-1]}")
             print("Solution Times:")
@@ -760,6 +794,10 @@ for experiment in experiments:
                     f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
                     f"({traj_min:.4f} -- {traj_max:.4f})"
                 )
+                f.write(
+                    f"Force: {force_mean:.4f} +- {force_std:.4f}"
+                    f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
+                )
             np.savez(
                 os.path.join(output_dir, "d_data.txt"),
                 dt=dt,
@@ -780,6 +818,7 @@ for experiment in experiments:
                 w_target=w_target_full,
                 time=time,
                 trajectories=trajectories,
+                actuation=actuation,
                 cost_mat=cost_mat,
                 tau_mat=tau_mat,
                 w_curr_mat=w_curr_mat,
@@ -805,5 +844,4 @@ for experiment in experiments:
                 ),
                 normalize=False,
             )
-            plt.show()
             fig_paths.savefig(os.path.join(output_dir, "g_paths.png"), dpi=900)
