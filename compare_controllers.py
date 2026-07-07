@@ -12,18 +12,26 @@ from braid_controller.visualization import plot
 
 # User-defined settings
 experiments = [
-    "grids_m3_spacelab_t6.yaml",
+    "grids_m3_1.yaml",
+    "grids_m5_1.yaml",
+    "grids_m5_2.yaml",
+    "grids_m10_1.yaml",
+    "grids_m10_2.yaml",
+    "grids_m10_3.yaml",
+    "grids_m10_4.yaml",
+    "grids_m10_5.yaml",
+    "grids_m10_6.yaml",
 ]
 
 controllers = [
-    # "distributed",
-    # "centralized",
+    "distributed",
+    "centralized",
     "grid",
 ]
 
 # Simulation and controller's properties
 dt: float = 0.25  # time step
-t_end: float = 1000  # total simulation time (s) NOTE: way larger than actually needed
+t_end: float = 1000  # total simulation time (s) NOTE: much larger than actually needed
 K: int = 21  # MPC horizon
 
 # Cost function weights
@@ -35,7 +43,7 @@ coeff_s: float = 20  # sharpness of sigmoid function for time-varying weights
 coeff_c: float = 0.9  # center of sigmoid function for time-varying weights [0,1]
 u_max: np.ndarray = np.array([0.5, 0.5])  # maximum control input (m/s)
 v_max: float = np.linalg.norm(u_max)  # maximum speed (m/s)
-u_rate_max: np.ndarray = np.array([0.15, 0.15]) * dt  # max velocity (a * dt)
+u_rate_max: np.ndarray = np.array([0.15, 0.15]) * dt  # max velocity change (a * dt)
 
 ## Preprocessing #######################################################################
 np.random.seed(1312)  # Set random seed for reproducibility
@@ -89,18 +97,18 @@ for experiment in experiments:
     n_generators: int | None = None
     n_generators_braid: int | None = None
     n_generators_grid: int | None = None
-    w_target: np.ndarray | None = None
+    w_target_full: np.ndarray | None = None
     n_windings: int | None = None
     if "braid" in data:
         pass  # TODO compute winding_targets from braid
         # braid = np.array(data["braid"])
         # n_generators_braid = braid.shape[0]  # number of generators in the braid word
         # n_generators = n_generators_braid
-        # w_target = invariants.braid2windings(braid, m)  --> to implement
+        # w_target_full = invariants.braid2windings(braid, m)  --> to implement
     if "grids" in data:
         grids = np.array(data["grids"])
         n_generators_grid = grids.shape[0]  # number of generators in the specification
-        if w_target is None:
+        if w_target_full is None:
             paths = invariants.grids2paths(grids)
             plot_grid_spec_3d, _ = plot.plot_paths_3d(
                 paths,
@@ -118,16 +126,19 @@ for experiment in experiments:
                 ),
                 normalize=False,
             )
-            w_target = invariants.paths2windings(
+            w_target_full = invariants.paths2windings(
                 paths,
-                upscale_factor=1000,
+                upscale_factor=100,
                 intermediate_shape="linear",
             )
-            n_windings = w_target.shape[0]
+            n_windings = w_target_full.shape[0]
             n_generators = n_generators_grid
 
     # Iterate over controllers and run simulations
     for controller in controllers:
+
+        # Print start of control loop
+        print(f"> Running {controller} controller.")
 
         # Reset agents after previous simulation
         for i in range(m):
@@ -158,6 +169,7 @@ for experiment in experiments:
         goal_reached: bool = False
         step: int = 0
         time: np.ndarray = np.arange(0, t_end + dt, dt)
+        n_time: int = len(time)
         trajectories: np.ndarray = np.zeros((len(time), 2, m))
         cost_mat: np.ndarray = np.zeros((len(time), 4, m))
         tau_mat: np.ndarray = np.zeros(len(time))
@@ -191,7 +203,7 @@ for experiment in experiments:
             x_prev = None
 
             # Run control loop
-            while goal_reached is False:
+            while goal_reached is False and step < n_time:
 
                 # 1. Update time-varying weights based on tau
                 alpha_g_k = alpha_g * weights.sigmoid(
@@ -219,21 +231,23 @@ for experiment in experiments:
                 tau, _ = invariants.estimate_tau(
                     agent_idx=None,
                     w_measured=w_curr,
-                    w_reference=w_target,
+                    w_reference=w_target_full,
                     tau_prev=tau,
                     delta_tau_max=delta_tau,
-                    weights=alpha_w,
+                    weights=alpha_w_k,
                 )
                 tau_mat[step] = tau
                 tau_target = np.clip(tau + horizon * delta_tau, 0, 1)  # sequence of tau
-                w_target = w_target[(tau_target * (n_windings - 1)).astype(int), :, :]
+                w_target = w_target_full[
+                    (tau_target * (n_windings - 1)).astype(int), :, :
+                ]
                 w_target_mat[step, :, :] = w_target[-1, :, :]
 
                 # 3. Solve centralized MPC problem
                 x_0 = [M[i].x for i in range(m)]
                 x_0 = np.array(x_0).T  # reshape to m x n_x
-                mpc.set_alpha_g(alpha_g)
-                mpc.set_alpha_w(alpha_w)
+                mpc.set_alpha_g(alpha_g_k)
+                mpc.set_alpha_w(alpha_w_k)
                 u_opt, x_opt, cost, t_sol = mpc.solve(
                     x_0=x_0,
                     x_goal=x_goal,
@@ -297,9 +311,18 @@ for experiment in experiments:
             print(f"\tTotal time: {time[-1]}")
             print("Solution Times:")
             print(
-                f"\t{t_sol_avg[0]:.2f}s "
-                f"(std: {t_sol_std[0]:.2f}s, max: {t_sol_max[0]:.2f}s)"
+                f"\t{t_sol_avg[0]:.4f}s "
+                f"(std: {t_sol_std[0]:.4f}s, max: {t_sol_max[0]:.4f}s)"
             )
+            with open(
+                os.path.join(output_dir, "c_stats.txt"), "w", encoding="utf-8"
+            ) as f:
+                f.write("Centralized MPC\n")
+                f.write(f"Total time: {time[-1]}\n")
+                f.write(
+                    f"Average time: {t_sol_avg[0]:.4f}s "
+                    f"(std: {t_sol_std[0]:.4f}s, max: {t_sol_max[0]:.4f}s)"
+                )
 
             # Generate and save plots
             fig_paths, _ = plot.plot_paths_3d(
@@ -310,7 +333,9 @@ for experiment in experiments:
                 normalize=False,
             )
             fig_cost, _ = plot.plot_cost(cost_mat, time)
-            fig_w_target, _ = plot.plot_windings(w_target, range(w_target.shape[0]))
+            fig_w_target, _ = plot.plot_windings(
+                w_target_full, range(w_target_full.shape[0])
+            )
             fig_w_curr, _ = plot.plot_windings(w_curr_mat, time)
             fig_tau, _ = plot.plot_tau(tau_mat, time)
             fig_paths.savefig(os.path.join(output_dir, "c_paths.png"), dpi=900)
@@ -348,13 +373,13 @@ for experiment in experiments:
             tau_i_mat: np.ndarray = np.zeros((len(time), m))
 
             # Run control loop
-            while goal_reached is False:
+            while goal_reached is False and step < n_time:
 
                 # 1. Update time-varying weights based on tau
                 alpha_g_k = alpha_g * weights.sigmoid(
                     tau,
                     coeff_sharpness=coeff_s,
-                    coeff_center=coeff_s,
+                    coeff_center=coeff_c,
                 )
                 alpha_w_k = (
                     alpha_w  # constant weight coefficient
@@ -377,16 +402,18 @@ for experiment in experiments:
                     tau_i[i], _ = invariants.estimate_tau(
                         agent_idx=i,
                         w_measured=w_curr,
-                        w_reference=w_target,
+                        w_reference=w_target_full,
                         tau_prev=tau,
                         delta_tau_max=delta_tau,
-                        weights=alpha_w,
+                        weights=alpha_w_k,
                     )
                     tau = np.mean(tau_i)
                 tau_i_mat[step, :] = tau_i
                 tau_mat[step] = tau
                 tau_target = np.clip(tau + horizon * delta_tau, 0, 1)  # sequence of tau
-                w_target = w_target[(tau_target * (n_windings - 1)).astype(int), :, :]
+                w_target = w_target_full[
+                    (tau_target * (n_windings - 1)).astype(int), :, :
+                ]
                 w_target_mat[step, :, :] = w_target[-1, :, :]
 
                 # 3. Update predicted trajectories for each agent
@@ -431,7 +458,7 @@ for experiment in experiments:
                 # 5. Execute control action
                 for i in range(m):
                     M[i].step(M[i].u_opt[0])
-                    trajectories[step, :, i] = M[i].x
+                    trajectories[step, :, i] = M[i].x[:2]
 
                 # 6. Update current winding numbers
                 theta = invariants.relative_headings(
@@ -449,7 +476,7 @@ for experiment in experiments:
                         np.array([M[i].x[:2] for i in range(m)]) - x_goal[:2, :].T,
                         axis=-1,
                     )
-                    < 0.1
+                    < 0.2  # CHECKME may need tuning
                 ):
                     goal_reached = True
                 else:
@@ -460,6 +487,7 @@ for experiment in experiments:
             trajectories = trajectories[:step, :, :]
             cost_mat = cost_mat[:step, :, :]
             tau_mat = tau_mat[:step]
+            tau_i_mat = tau_i_mat[:step, :]
             w_curr_mat = w_curr_mat[:step, :, :]
             w_target_mat = w_target_mat[:step, :, :]
             t_sol_mat = t_sol_mat[:step, :]
@@ -473,9 +501,23 @@ for experiment in experiments:
             print("Solution Times:")
             for i in range(m):
                 print(
-                    f"\tAgent {i}: {t_sol_avg[i]:.2f}s (std: {t_sol_std[i]:.2f}s, "
-                    f"max: {t_sol_max[i]:.2f}s)"
+                    f"\tAgent {i}: {t_sol_avg[i]:.4f}s (std: {t_sol_std[i]:.4f}s, "
+                    f"max: {t_sol_max[i]:.4f}s)"
                 )
+            with open(
+                os.path.join(output_dir, "d_stats.txt"), "w", encoding="utf-8"
+            ) as f:
+                f.write("Distributed MPC\n")
+                f.write(f"Total time: {time[-1]}\n")
+                for i in range(m):
+                    f.write(
+                        f"Agent {i}: {t_sol_avg[i]:.4f}s "
+                        f"(std: {t_sol_std[i]:.4f}s, max: {t_sol_max[i]:.4f}s)"
+                    )
+                f.write(
+                    f"Global average: {np.mean(t_sol_mat)} (std: {np.std(t_sol_mat)})"
+                )
+                f.write(f"Global max: {np.max(t_sol_mat)}")
 
             # Generate and save plots
             fig_paths, _ = plot.plot_paths_3d(
@@ -486,14 +528,16 @@ for experiment in experiments:
                 normalize=False,
             )
             fig_cost, _ = plot.plot_cost(cost_mat, time)
-            fig_w_target, _ = plot.plot_windings(w_target, range(w_target.shape[0]))
+            fig_w_target, _ = plot.plot_windings(
+                w_target_full, range(w_target_full.shape[0])
+            )
             fig_w_curr, _ = plot.plot_windings(w_curr_mat, time)
             fig_tau, _ = plot.plot_tau(tau_mat, time, tau_i=tau_i_mat)
-            fig_paths.savefig(os.path.join(output_dir, "c_paths.png"), dpi=900)
-            fig_cost.savefig(os.path.join(output_dir, "c_cost.png"), dpi=900)
-            fig_w_target.savefig(os.path.join(output_dir, "c_w_target.png"), dpi=900)
-            fig_w_curr.savefig(os.path.join(output_dir, "c_w_curr.png"), dpi=900)
-            fig_tau.savefig(os.path.join(output_dir, "c_tau.png"), dpi=900)
+            fig_paths.savefig(os.path.join(output_dir, "d_paths.png"), dpi=900)
+            fig_cost.savefig(os.path.join(output_dir, "d_cost.png"), dpi=900)
+            fig_w_target.savefig(os.path.join(output_dir, "d_w_target.png"), dpi=900)
+            fig_w_curr.savefig(os.path.join(output_dir, "d_w_curr.png"), dpi=900)
+            fig_tau.savefig(os.path.join(output_dir, "d_tau.png"), dpi=900)
 
         elif controller == "grid":
 
@@ -514,7 +558,7 @@ for experiment in experiments:
             grid_gen_idx: int = 0
             targets: np.ndarray = np.zeros((m, 2))
             move_to_goal: bool = False
-            while goal_reached is False:
+            while goal_reached is False and step < n_time:
 
                 # Select target
                 if move_to_goal is False:
@@ -534,26 +578,34 @@ for experiment in experiments:
                 # Plan motion for each robot
                 for i in range(m):
                     x_opt, u_opt, cost, t_sol = grid_controller(
-                        x_curr=M[i].x[:2],
+                        x_init=M[i].x[:2],
                         x_goal=targets[i, :],
                         K=K,
                         dt=dt,
-                        v_max=u_max,
-                        a_max=u_rate_max,
+                        u_max=u_max,
+                        u_rate_max=u_rate_max,
+                        u_prev=M[i].v[:2],  # note: v = u (without multiplication by dt)
                     )
-                    M[i].step(u_opt[:, 0])
+                    M[i].u_opt = u_opt
+                    M[i].x_opt = x_opt
+                    M[i].cost = cost
+                    M[i].t_sol = t_sol
                     t_sol_mat[step, i] = t_sol
                     cost_mat[step, :, i] = cost
+
+                # Execute control actions
+                for i in range(m):
+                    M[i].step(M[i].u_opt[:, 0])
                     trajectories[step, :, i] = M[i].x[:2]
 
-                    # Advance progress if agent is close enough to target
-                    x_all = np.array([M[i].x[:2] for i in range(m)])
-                    distances = np.linalg.norm(x_all - targets, axis=-1)
-                    if np.all(distances < 0.1):
-                        if grid_gen_idx < n_generators_grid - 1:
-                            grid_gen_idx += 1  # move to next index
-                        else:
-                            move_to_goal = True
+                # Advance progress if agent is close enough to target
+                x_all = np.array([M[i].x[:2] for i in range(m)])
+                distances = np.linalg.norm(x_all - targets, axis=-1)
+                if np.all(distances < 0.1):
+                    if grid_gen_idx < n_generators_grid - 1:
+                        grid_gen_idx += 1  # move to next index
+                    else:
+                        move_to_goal = True
 
                 # 6. Check if sim is completed or move to next time step
                 if move_to_goal is True and np.all(
@@ -585,9 +637,23 @@ for experiment in experiments:
             print("Solution Times:")
             for i in range(m):
                 print(
-                    f"\tAgent {i}: {t_sol_avg[i]:.2f}s (std: {t_sol_std[i]:.2f}s, "
-                    f"max: {t_sol_max[i]:.2f}s)"
+                    f"\tAgent {i}: {t_sol_avg[i]:.4f}s (std: {t_sol_std[i]:.4f}s, "
+                    f"max: {t_sol_max[i]:.4f}s)"
                 )
+            with open(
+                os.path.join(output_dir, "g_stats.txt"), "w", encoding="utf-8"
+            ) as f:
+                f.write("Grid Controller\n")
+                f.write(f"Total time: {time[-1]}\n")
+                for i in range(m):
+                    f.write(
+                        f"Agent {i}: {t_sol_avg[i]:.4f}s "
+                        f"(std: {t_sol_std[i]:.4f}s, max: {t_sol_max[i]:.4f}s)"
+                    )
+                f.write(
+                    f"Global average: {np.mean(t_sol_mat)} (std: {np.std(t_sol_mat)})"
+                )
+                f.write(f"Global max: {np.max(t_sol_mat)}")
 
             # Generate and save plots
             fig_paths, _ = plot.plot_paths_3d(
