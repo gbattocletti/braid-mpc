@@ -24,9 +24,9 @@ experiments = [
 ]
 
 controllers = [
-    "distributed",
+    # "distributed",
     "centralized",
-    "grid",
+    # "grid",
 ]
 
 # Simulation and controller's properties
@@ -100,7 +100,7 @@ for experiment in experiments:
     w_target_full: np.ndarray | None = None
     n_windings: int | None = None
     if "braid" in data:
-        pass  # TODO compute winding_targets from braid
+        pass  # TODO compute winding_targets directly from braid
         # braid = np.array(data["braid"])
         # n_generators_braid = braid.shape[0]  # number of generators in the braid word
         # n_generators = n_generators_braid
@@ -309,12 +309,25 @@ for experiment in experiments:
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
             t_sol_max = np.max(t_sol_mat, axis=0)
+            traj_len = np.zeros(m)
+            for i in range(m):
+                traj_len[i] = np.sum(
+                    np.linalg.norm(np.diff(trajectories[:, :, i], axis=0), axis=-1)
+                )
+            traj_mean = np.mean(traj_len)
+            traj_std = np.std(traj_len)
+            traj_min = np.min(traj_len)
+            traj_max = np.max(traj_len)
             print("Centralized MPC")
             print(f"\tTotal time: {time[-1]}")
             print("Solution Times:")
             print(
                 f"\t{t_sol_avg[0]:.4f}s "
                 f"(std: {t_sol_std[0]:.4f}s, max: {t_sol_max[0]:.4f}s)"
+            )
+            print(
+                f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
+                f"({traj_min:.4f} -- {traj_max:.4f})"
             )
             with open(
                 os.path.join(output_dir, "c_stats.txt"), "w", encoding="utf-8"
@@ -324,6 +337,10 @@ for experiment in experiments:
                 f.write(
                     f"Average time: {t_sol_avg[0]:.4f}s "
                     f"(std: {t_sol_std[0]:.4f}s, max: {t_sol_max[0]:.4f}s)"
+                )
+                f.write(
+                    f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
+                    f"({traj_min:.4f} -- {traj_max:.4f})"
                 )
             np.savez(
                 os.path.join(output_dir, "c_data.txt"),
@@ -524,6 +541,15 @@ for experiment in experiments:
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
             t_sol_max = np.max(t_sol_mat, axis=0)
+            traj_len = np.zeros(m)
+            for i in range(m):
+                traj_len[i] = np.sum(
+                    np.linalg.norm(np.diff(trajectories[:, :, i], axis=0), axis=-1)
+                )
+            traj_mean = np.mean(traj_len)
+            traj_std = np.std(traj_len)
+            traj_min = np.min(traj_len)
+            traj_max = np.max(traj_len)
             print("Distributed MPC")
             print(f"\tTotal time: {time[-1]}")
             print("Solution Times:")
@@ -532,6 +558,10 @@ for experiment in experiments:
                     f"\tAgent {i}: {t_sol_avg[i]:.4f}s (std: {t_sol_std[i]:.4f}s, "
                     f"max: {t_sol_max[i]:.4f}s)"
                 )
+            print(
+                f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
+                f"({traj_min:.4f} -- {traj_max:.4f})"
+            )
             with open(
                 os.path.join(output_dir, "d_stats.txt"), "w", encoding="utf-8"
             ) as f:
@@ -546,6 +576,10 @@ for experiment in experiments:
                     f"Global average: {np.mean(t_sol_mat)} (std: {np.std(t_sol_mat)})"
                 )
                 f.write(f"Global max: {np.max(t_sol_mat)}")
+                f.write(
+                    f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
+                    f"({traj_min:.4f} -- {traj_max:.4f})"
+                )
             np.savez(
                 os.path.join(output_dir, "d_data.txt"),
                 dt=dt,
@@ -687,6 +721,15 @@ for experiment in experiments:
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
             t_sol_max = np.max(t_sol_mat, axis=0)
+            traj_len = np.zeros(m)
+            for i in range(m):
+                traj_len[i] = np.sum(
+                    np.linalg.norm(np.diff(trajectories[:, :, i], axis=0), axis=-1)
+                )
+            traj_mean = np.mean(traj_len)
+            traj_std = np.std(traj_len)
+            traj_min = np.min(traj_len)
+            traj_max = np.max(traj_len)
             print("Grid Controller")
             print(f"\tTotal time: {time[-1]}")
             print("Solution Times:")
@@ -695,6 +738,10 @@ for experiment in experiments:
                     f"\tAgent {i}: {t_sol_avg[i]:.4f}s (std: {t_sol_std[i]:.4f}s, "
                     f"max: {t_sol_max[i]:.4f}s)"
                 )
+            print(
+                f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
+                f"({traj_min:.4f} -- {traj_max:.4f})"
+            )
             with open(
                 os.path.join(output_dir, "g_stats.txt"), "w", encoding="utf-8"
             ) as f:
@@ -709,6 +756,10 @@ for experiment in experiments:
                     f"Global average: {np.mean(t_sol_mat)} (std: {np.std(t_sol_mat)})"
                 )
                 f.write(f"Global max: {np.max(t_sol_mat)}")
+                f.write(
+                    f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
+                    f"({traj_min:.4f} -- {traj_max:.4f})"
+                )
             np.savez(
                 os.path.join(output_dir, "d_data.txt"),
                 dt=dt,
