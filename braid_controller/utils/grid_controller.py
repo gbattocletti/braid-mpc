@@ -27,7 +27,7 @@ def grid_controller(
     dt: float,
     u_max: np.ndarray,
     u_rate_max: np.ndarray,
-    u_prev: np.ndarray | None = None,
+    u_prev: np.ndarray,
 ):
     """
     Controller using CasADi to solve a quadratic program for smooth straight-line
@@ -41,38 +41,48 @@ def grid_controller(
         x_goal (np.ndarray): (2,) target position
         K (int): horizon length (number of steps)
         dt (float): time step duration
-        v_max (np.ndarray): (2, ) max per-step displacement along x, y
-        a_max (np.ndarray): (2, ) max change in per-step displacement along x, y
+        u_max (np.ndarray): (2, ) max per-step displacement along x, y (control input)
+        u_rate_max (np.ndarray): (2, ) max change in per-step displacement along x, y
+        u_prev (np.ndarray): (2, ) control input (displacement) at previous time step
 
     Returns:
         x (np.ndarray): (2, K+1) optimal trajectory from x_init to x_goal
         u (np.ndarray): (2, K) optimal displacements
     """
-    # TODO include u_prev
-    if u_prev is not None:
-        pass
-
     # Initialize ocp
     ocp = ca.Opti()
     ocp.solver(solver, ocp_options, solver_options)
     x = ocp.variable(2, K + 1)
+    u = ocp.variable(2, K)
 
     # Boundary conditions
     ocp.subject_to(x[:, 0] == x_init)
 
-    # State and input constraints
-    u = x[:, 1 : K + 1] - x[:, 0:K]  # velocity (input of single integrator)
-    uu = u[:, 1:K] - u[:, 0 : K - 1]  # acceleration (change in velocity)
-    ocp.subject_to(ocp.bounded(-u_max[0] * dt, u[0, :], u_max[0] * dt))
-    ocp.subject_to(ocp.bounded(-u_max[1] * dt, u[1, :], u_max[1] * dt))
-    ocp.subject_to(ocp.bounded(-u_rate_max[0] * dt, uu[0, :], u_rate_max[0] * dt))
-    ocp.subject_to(ocp.bounded(-u_rate_max[1] * dt, uu[1, :], u_rate_max[1] * dt))
+    # Dynamics
+    for k in range(K):
+        x_next = x[:, k] + u[:, k] * dt
+        ocp.subject_to(x[:, k + 1] == x_next)
+
+    # Input constraints
+    for k in range(K):
+        ocp.subject_to(-u_max <= u[:, k])
+        ocp.subject_to(u[:, k] <= u_max)
+    ocp.subject_to(-u_rate_max <= u[:, 0] - u_prev)
+    ocp.subject_to(u[:, 0] - u_prev <= u_rate_max)
+    for k in range(K - 1):
+        ocp.subject_to(-u_rate_max <= u[:, k + 1] - u[:, k])
+        ocp.subject_to(u[:, k + 1] - u[:, k] <= u_rate_max)
 
     # Objective (quadratic cost)
     cost_function = 0
+    alpha_u = 1
+    alpha_g = 100
     for k in range(K):
-        cost_function += u[:, k].T @ np.diag([1, 1]) @ u[:, k]  # control effort
-        cost_function += ca.sumsqr(x[:, k + 1] - x_goal)  # distance to goal
+        cost_function += alpha_u * u[:, k].T @ np.diag([1, 1]) @ u[:, k]
+    for k in range(1, K + 1):
+        cost_function += alpha_g * (
+            (x[0, k] - x_goal[0]) ** 2 + (x[1, k] - x_goal[1]) ** 2
+        )
     ocp.minimize(cost_function)
 
     # Solve the optimization problem and return the optimal trajectory and displacements
