@@ -329,8 +329,8 @@ class MPC(ABC):
             raise ValueError(f"Invalid architecture: {self.architecture}")
         c: float = self.sol.value(self.cost_function)
         t: float = self.sol.stats()[
-            "t_proc_total"
-        ]  # CPU time. Alternative: t_wall_total for wall time
+            "t_wall_total"
+        ]  # solve time. Use t_proc_total for cpu time (sum over threads, linux only)
 
         # Return the solution
         return u_opt, x_opt, c, t
