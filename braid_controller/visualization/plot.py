@@ -7,7 +7,7 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 
 
-def _tab10_colors(m: int) -> list:
+def tab10_colors(m: int) -> list:
     """
     Return the first m colors of the tab10 sequence. Ensures compatibility with
     different versions of matplotlib.
@@ -16,6 +16,22 @@ def _tab10_colors(m: int) -> list:
         return plt.color_sequences["tab10"][:m]  # matplotlib >= 3.6
     except AttributeError:
         return plt.get_cmap("tab10").colors[:m]  # older versions
+
+
+def tab60_colors(m: int) -> list:
+    """
+    Return the first m colors from a tab60 sequence.
+    """
+    try:
+        seqs = plt.color_sequences  # matplotlib >= 3.6
+        base = seqs["tab20"] + seqs["tab20b"] + seqs["tab20c"]
+    except AttributeError:
+        base = (
+            list(plt.get_cmap("tab20").colors)  # older versions
+            + list(plt.get_cmap("tab20b").colors)
+            + list(plt.get_cmap("tab20c").colors)
+        )
+    return base[:m]
 
 
 def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
@@ -56,7 +72,7 @@ def plot_paths_2d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
     _, _, m = paths.shape
 
     # Create the plot
-    colors = _tab10_colors(m)
+    colors = tab10_colors(m)
     fig, ax = plt.subplots(figsize=figsize / 2.54)
     for i in range(m):
         x = paths[:, 0, i]
@@ -143,7 +159,7 @@ def plot_paths_3d(paths: np.ndarray, **kwargs) -> tuple[plt.Figure, plt.Axes]:
         time = np.arange(n)  # Create time array for z-axis
 
     # Define colormaps
-    colors = _tab10_colors(m)
+    colors = tab10_colors(m)
 
     # Normalize space to mxm square for consistent visualization
     if normalize:
@@ -239,7 +255,7 @@ def plot_windings(
     _, m, _ = windings.shape
 
     # Define colormaps
-    colors = _tab10_colors(m)
+    colors = tab10_colors(m)
 
     # Create the plot
     plot_cols = 3
@@ -342,7 +358,7 @@ def plot_cost(
 
     # Initialize colormap
     _, _, m = cost.shape
-    colors = _tab10_colors(m)
+    colors = tab10_colors(m)
 
     # Create the plot
     fig: plt.Figure
@@ -437,7 +453,7 @@ def plot_tau(
     m = tau_i.shape[1] if tau_i is not None else 0
 
     # Define colormaps
-    colors = _tab10_colors(m)
+    colors = tab10_colors(m)
 
     # Create the plot
     fig, ax = plt.subplots(figsize=figsize / 2.54)
