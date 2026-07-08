@@ -359,7 +359,7 @@ for experiment in experiments:
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})\n"
                 )
             np.savez(
-                os.path.join(output_dir, "c_data.txt"),
+                os.path.join(output_dir, "c_data"),
                 dt=dt,
                 K=K,
                 m=m,
@@ -620,7 +620,7 @@ for experiment in experiments:
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})\n"
                 )
             np.savez(
-                os.path.join(output_dir, "d_data.txt"),
+                os.path.join(output_dir, "d_data"),
                 dt=dt,
                 K=K,
                 m=m,
@@ -778,7 +778,6 @@ for experiment in experiments:
             force_tot = np.sum(force)
 
             # Print & save stats
-            print("Grid Controller")
             print(f"Total time: {time[-1]}")
             print("Solver time:")
             for i in range(m):
@@ -824,7 +823,7 @@ for experiment in experiments:
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})\n"
                 )
             np.savez(
-                os.path.join(output_dir, "d_data.txt"),
+                os.path.join(output_dir, "g_data"),
                 dt=dt,
                 K=K,
                 m=m,
