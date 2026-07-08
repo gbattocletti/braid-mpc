@@ -23,7 +23,7 @@ experiments = [
 
 controllers = [
     "distributed",
-    "centralized",
+    # "centralized",
     "grid",
 ]
 
@@ -325,8 +325,7 @@ for experiment in experiments:
             force_tot = np.sum(force)
 
             # Print & save stats
-            print("Centralized MPC")
-            print(f"\tTotal time: {time[-1]}")
+            print(f"Total time: {time[-1]}")
             print("Solver time:")
             print(
                 f"\t{t_sol_avg[0]:.4f}s "
@@ -349,15 +348,15 @@ for experiment in experiments:
                 f.write(f"Total time: {time[-1]}\n")
                 f.write(
                     f"Solver time (global): {t_sol_avg[0]:.4f}s "
-                    f"(std: {t_sol_std[0]:.4f}s, max: {t_sol_max[0]:.4f}s)"
+                    f"(std: {t_sol_std[0]:.4f}s, max: {t_sol_max[0]:.4f}s)\n"
                 )
                 f.write(
                     f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
-                    f"({traj_min:.4f} -- {traj_max:.4f})"
+                    f"({traj_min:.4f} -- {traj_max:.4f})\n"
                 )
                 f.write(
                     f"Forces: {force_mean:.4f} +- {force_std:.4f}"
-                    f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
+                    f"(max: {force_max:.4f}, tot: {force_tot:.4f})\n"
                 )
             np.savez(
                 os.path.join(output_dir, "c_data.txt"),
@@ -576,8 +575,7 @@ for experiment in experiments:
             force_tot = np.sum(force)
 
             # Print & save stats
-            print("Distributed MPC")
-            print(f"\tTotal time: {time[-1]}")
+            print(f"Total time: {time[-1]}")
             print("Solver time:")
             for i in range(m):
                 print(
@@ -596,7 +594,7 @@ for experiment in experiments:
             )
             print("Forces:")
             print(
-                f"{force_mean:.4f} +- {force_std:.4f}"
+                f"\t{force_mean:.4f} +- {force_std:.4f}"
                 f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
             )
             with open(
@@ -607,19 +605,19 @@ for experiment in experiments:
                 for i in range(m):
                     f.write(
                         f"Solver time agent {i}: {t_sol_avg[i]:.4f}s "
-                        f"(std: {t_sol_std[i]:.4f}s, max: {t_sol_max[i]:.4f}s)"
+                        f"(std: {t_sol_std[i]:.4f}s, max: {t_sol_max[i]:.4f}s)\n"
                     )
                 f.write(
                     f"Solver time (global): {np.mean(t_sol_mat):.4f} "
-                    f"(std: {np.std(t_sol_mat):.4f}, max: {np.max(t_sol_mat):.4f})"
+                    f"(std: {np.std(t_sol_mat):.4f}, max: {np.max(t_sol_mat):.4f})\n"
                 )
                 f.write(
                     f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
-                    f"({traj_min:.4f} -- {traj_max:.4f})"
+                    f"({traj_min:.4f} -- {traj_max:.4f})\n"
                 )
                 f.write(
                     f"Forces: {force_mean:.4f} +- {force_std:.4f}"
-                    f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
+                    f"(max: {force_max:.4f}, tot: {force_tot:.4f})\n"
                 )
             np.savez(
                 os.path.join(output_dir, "d_data.txt"),
@@ -781,7 +779,7 @@ for experiment in experiments:
 
             # Print & save stats
             print("Grid Controller")
-            print(f"\tTotal time: {time[-1]}")
+            print(f"Total time: {time[-1]}")
             print("Solver time:")
             for i in range(m):
                 print(
@@ -795,12 +793,12 @@ for experiment in experiments:
             )
             print("Paths:")
             print(
-                f"{traj_mean:.4f} +- {traj_std:.4f} "
+                f"\t{traj_mean:.4f} +- {traj_std:.4f} "
                 f"({traj_min:.4f} -- {traj_max:.4f})"
             )
             print("Forces:")
             print(
-                f"{force_mean:.4f} +- {force_std:.4f}"
+                f"\t{force_mean:.4f} +- {force_std:.4f}"
                 f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
             )
             with open(
@@ -808,23 +806,22 @@ for experiment in experiments:
             ) as f:
                 f.write("Grid Controller\n")
                 f.write(f"Total time: {time[-1]}\n")
-                print("Solver time:")
                 for i in range(m):
                     f.write(
                         f"Solver time agent {i}: {t_sol_avg[i]:.4f}s "
-                        f"(std: {t_sol_std[i]:.4f}s, max: {t_sol_max[i]:.4f}s)"
+                        f"(std: {t_sol_std[i]:.4f}s, max: {t_sol_max[i]:.4f}s)\n"
                     )
                 f.write(
                     f"Solver time (global): {np.mean(t_sol_mat):.4f} "
-                    f"(std: {np.std(t_sol_mat):.4f}, max: {np.max(t_sol_mat):.4f})"
+                    f"(std: {np.std(t_sol_mat):.4f}, max: {np.max(t_sol_mat):.4f})\n"
                 )
                 f.write(
                     f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
-                    f"({traj_min:.4f} -- {traj_max:.4f})"
+                    f"({traj_min:.4f} -- {traj_max:.4f})\n"
                 )
                 f.write(
                     f"Force: {force_mean:.4f} +- {force_std:.4f}"
-                    f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
+                    f"(max: {force_max:.4f}, tot: {force_tot:.4f})\n"
                 )
             np.savez(
                 os.path.join(output_dir, "d_data.txt"),
