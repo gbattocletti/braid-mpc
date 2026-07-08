@@ -1,5 +1,6 @@
 import os
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from braid_controller.core import agent, mpc_centralized, mpc_distributed
@@ -134,6 +135,9 @@ for experiment in experiments:
 
     # Iterate over controllers and run simulations
     for controller in controllers:
+
+        # Close all figures
+        plt.close("all")
 
         # Print start of control loop
         print(f"\nRunning {controller} controller.")
@@ -510,7 +514,7 @@ for experiment in experiments:
                     M[i].x_opt = x_opt
                     M[i].cost = cost
                     M[i].t_sol = t_sol
-                    t_sol_mat[step, :] = t_sol
+                    t_sol_mat[step, i] = t_sol
                     _, cost_g, cost_u, cost_w = mpc.check_cost()
                     cost_mat[step, 0, i] = cost
                     cost_mat[step, 1, i] = cost_g
