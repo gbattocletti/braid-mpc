@@ -11,20 +11,19 @@ from braid_controller.visualization import plot
 
 # User-defined settings
 experiments = [
-    "grids_m3_1.yaml",
-    # "grids_m5_1.yaml",
-    # "grids_m5_2.yaml",
-    # "grids_m10_1.yaml",
-    # "grids_m10_2.yaml",
-    # "grids_m10_3.yaml",
-    # "grids_m10_4.yaml",
-    # "grids_m10_5.yaml",
-    # "grids_m10_6.yaml",
+    "grids_m5_1.yaml",
+    "grids_m5_2.yaml",
+    "grids_m10_1.yaml",
+    "grids_m10_2.yaml",
+    "grids_m10_3.yaml",
+    "grids_m10_4.yaml",
+    "grids_m10_5.yaml",
+    "grids_m10_6.yaml",
 ]
 
 controllers = [
-    # "distributed",
-    # "centralized",
+    "distributed",
+    "centralized",
     "grid",
 ]
 
@@ -328,14 +327,20 @@ for experiment in experiments:
             # Print & save stats
             print("Centralized MPC")
             print(f"\tTotal time: {time[-1]}")
-            print("Solution Times:")
+            print("Solver time:")
             print(
                 f"\t{t_sol_avg[0]:.4f}s "
                 f"(std: {t_sol_std[0]:.4f}s, max: {t_sol_max[0]:.4f}s)"
             )
+            print("Paths:")
             print(
-                f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
+                f"\t{traj_mean:.4f} +- {traj_std:.4f} "
                 f"({traj_min:.4f} -- {traj_max:.4f})"
+            )
+            print("Forces:")
+            print(
+                f"\t{force_mean:.4f} +- {force_std:.4f}"
+                f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
             )
             with open(
                 os.path.join(output_dir, "c_stats.txt"), "w", encoding="utf-8"
@@ -343,7 +348,7 @@ for experiment in experiments:
                 f.write("Centralized MPC\n")
                 f.write(f"Total time: {time[-1]}\n")
                 f.write(
-                    f"Average time: {t_sol_avg[0]:.4f}s "
+                    f"Solver time (global): {t_sol_avg[0]:.4f}s "
                     f"(std: {t_sol_std[0]:.4f}s, max: {t_sol_max[0]:.4f}s)"
                 )
                 f.write(
@@ -351,7 +356,7 @@ for experiment in experiments:
                     f"({traj_min:.4f} -- {traj_max:.4f})"
                 )
                 f.write(
-                    f"Force: {force_mean:.4f} +- {force_std:.4f}"
+                    f"Forces: {force_mean:.4f} +- {force_std:.4f}"
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
                 )
             np.savez(
@@ -573,15 +578,26 @@ for experiment in experiments:
             # Print & save stats
             print("Distributed MPC")
             print(f"\tTotal time: {time[-1]}")
-            print("Solution Times:")
+            print("Solver time:")
             for i in range(m):
                 print(
                     f"\tAgent {i}: {t_sol_avg[i]:.4f}s (std: {t_sol_std[i]:.4f}s, "
                     f"max: {t_sol_max[i]:.4f}s)"
                 )
+            print("Solver time (global):")
             print(
-                f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
+                f"\t{np.mean(t_sol_mat):.4f}s (std: {np.std(t_sol_mat):.4f}s, "
+                f"max: {np.max(t_sol_mat):.4f}s)"
+            )
+            print("Paths:")
+            print(
+                f"\t{traj_mean:.4f} +- {traj_std:.4f} "
                 f"({traj_min:.4f} -- {traj_max:.4f})"
+            )
+            print("Forces:")
+            print(
+                f"{force_mean:.4f} +- {force_std:.4f}"
+                f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
             )
             with open(
                 os.path.join(output_dir, "d_stats.txt"), "w", encoding="utf-8"
@@ -590,19 +606,19 @@ for experiment in experiments:
                 f.write(f"Total time: {time[-1]}\n")
                 for i in range(m):
                     f.write(
-                        f"Agent {i}: {t_sol_avg[i]:.4f}s "
+                        f"Solver time agent {i}: {t_sol_avg[i]:.4f}s "
                         f"(std: {t_sol_std[i]:.4f}s, max: {t_sol_max[i]:.4f}s)"
                     )
                 f.write(
-                    f"Global average: {np.mean(t_sol_mat)} (std: {np.std(t_sol_mat)})"
+                    f"Solver time (global): {np.mean(t_sol_mat):.4f} "
+                    f"(std: {np.std(t_sol_mat):.4f}, max: {np.max(t_sol_mat):.4f})"
                 )
-                f.write(f"Global max: {np.max(t_sol_mat)}")
                 f.write(
                     f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
                     f"({traj_min:.4f} -- {traj_max:.4f})"
                 )
                 f.write(
-                    f"Force: {force_mean:.4f} +- {force_std:.4f}"
+                    f"Forces: {force_mean:.4f} +- {force_std:.4f}"
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
                 )
             np.savez(
@@ -766,30 +782,42 @@ for experiment in experiments:
             # Print & save stats
             print("Grid Controller")
             print(f"\tTotal time: {time[-1]}")
-            print("Solution Times:")
+            print("Solver time:")
             for i in range(m):
                 print(
                     f"\tAgent {i}: {t_sol_avg[i]:.4f}s (std: {t_sol_std[i]:.4f}s, "
                     f"max: {t_sol_max[i]:.4f}s)"
                 )
+            print("Solver time (global):")
             print(
-                f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
+                f"\t{np.mean(t_sol_mat):.4f}s (std: {np.std(t_sol_mat):.4f}s, "
+                f"max: {np.max(t_sol_mat):.4f}s)"
+            )
+            print("Paths:")
+            print(
+                f"{traj_mean:.4f} +- {traj_std:.4f} "
                 f"({traj_min:.4f} -- {traj_max:.4f})"
+            )
+            print("Forces:")
+            print(
+                f"{force_mean:.4f} +- {force_std:.4f}"
+                f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
             )
             with open(
                 os.path.join(output_dir, "g_stats.txt"), "w", encoding="utf-8"
             ) as f:
                 f.write("Grid Controller\n")
                 f.write(f"Total time: {time[-1]}\n")
+                print("Solver time:")
                 for i in range(m):
                     f.write(
-                        f"Agent {i}: {t_sol_avg[i]:.4f}s "
+                        f"Solver time agent {i}: {t_sol_avg[i]:.4f}s "
                         f"(std: {t_sol_std[i]:.4f}s, max: {t_sol_max[i]:.4f}s)"
                     )
                 f.write(
-                    f"Global average: {np.mean(t_sol_mat)} (std: {np.std(t_sol_mat)})"
+                    f"Solver time (global): {np.mean(t_sol_mat):.4f} "
+                    f"(std: {np.std(t_sol_mat):.4f}, max: {np.max(t_sol_mat):.4f})"
                 )
-                f.write(f"Global max: {np.max(t_sol_mat)}")
                 f.write(
                     f"Paths: {traj_mean:.4f} +- {traj_std:.4f} "
                     f"({traj_min:.4f} -- {traj_max:.4f})"
