@@ -13,7 +13,9 @@ wheels/
 # Dev files
 .dev
 matlab-tests
-results
+results/*
+!results/plot_distributed_mpc.py
+!results/plot_braid.m
 
 # Vscode folder
 .vscode
