@@ -10,7 +10,7 @@ import numpy as np
 if sys.platform.startswith("linux") and shutil.which("matlab") is not None:
     try:
         import matlab
-        import matlab.engine
+        import matlab.engine  # uv pip install "matlabengine==25.2.*"
     except ImportError as e:
         # MATLAB found but engine not installed
         raise ImportError("MATLAB found but matlab engine not installed") from e
@@ -32,7 +32,7 @@ class Braidlab:
             )
 
     def paths2braid(
-        self, paths: np.ndarray, angle: float
+        self, paths: np.ndarray, angle: float = 0
     ) -> tuple[np.ndarray, "matlab.object"]:
         """
         Convert paths to braids using the braidlab library in MATLAB.

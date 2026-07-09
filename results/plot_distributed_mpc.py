@@ -6,8 +6,10 @@ from pathlib import Path as FilePath
 
 import matplotlib.pyplot as plt
 import numpy as np
+from mpl_toolkits.mplot3d import proj3d
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 
+from braid_controller.utils.braidlab_bridge import Braidlab
 from braid_controller.visualization.plot import tab10_colors, tab60_colors
 
 ########################################################################################
@@ -197,9 +199,9 @@ ax_tau.grid(True)
 # 4. Trajectories plot
 figsize = np.array([6, 5])
 fig_paths: plt.Figure = plt.figure(figsize=figsize / 2.54)
-ax_paths: Axes3D = fig_paths.add_subplot(projection="3d")
+ax_paths: Axes3D = fig_paths.add_subplot(projection="3d", computed_zorder=False)
 ax_paths.tick_params(axis="z", labelsize=6)
-paths: np.ndarray = data["trajectories"]
+trajectories_mat: np.ndarray = data["trajectories"]
 time: np.ndarray = data["time"]
 x_lims: np.ndarray = data["x_lim"]
 y_lims: np.ndarray = data["y_lim"]
@@ -213,8 +215,7 @@ try:
 except (ValueError, NotImplementedError):
     xr = x_lims[1] - x_lims[0]
     yr = y_lims[1] - y_lims[0]
-    ax_paths.set_box_aspect((xr, yr, 1.5))
-    # Alternative: ax.set_box_aspect([1, 1, 2])
+    ax_paths.set_box_aspect((xr, yr, 1.5))  # alternative: ax.set_box_aspect([1, 1, 2])
 try:
     ax_paths.view_init(elev=pov[0], azim=pov[1], roll=pov[2])  # matplotlib >= 3.6
 except TypeError:
@@ -222,10 +223,43 @@ except TypeError:
 ax_paths.set_xlabel("x")
 ax_paths.set_ylabel("y")
 ax_paths.set_zlabel("t")
+n, _, m = trajectories_mat.shape
+trajectories = []
 for i in range(m):
-    x = paths[:, 0, i]
-    y = paths[:, 1, i]
-    ax_paths.plot(x, y, time, linewidth=1.3, color=colors[i], label=f"Agent {i+1}")
+    trajectories.append(trajectories_mat[:, :, i])
+seg_points = []
+seg_colors = []
+for i, traj_i in enumerate(trajectories):
+    traj_i = np.asarray(traj_i)
+    for p1, p2 in zip(traj_i[:-1], traj_i[1:]):
+        seg_points.append((p1, p2))  # endpoints of current segment ((x,y,z), (x,y,z))
+        seg_colors.append(colors[i])  # color of current segment (depending on robot)
+seg_points = np.array(seg_points)  # stack of endoints of each path segment (m*n, 2, 3)
+mids = seg_points.mean(axis=1)  # midpoints of each segment (m*n, 3)
+proj = ax_paths.get_proj()  # get projection direction based on POV
+_, _, z_projected = proj3d.proj_transform(
+    mids[:, 0],
+    mids[:, 1],
+    mids[:, 2],
+    proj,
+)  # project in proj coordinates, z_projected encodes projection depth
+order = np.argsort(z_projected)
+for rank, idx in enumerate(order):
+    p1, p2 = seg_points[idx]
+    ax_paths.plot(
+        [p1[0], p2[0]],
+        [p1[1], p2[1]],
+        [p1[2], p2[2]],
+        color=seg_colors[idx],
+        linewidth=1.2,
+        zorder=rank,
+    )
+
+########################################################################################
+# Extract braid from paths
+braidlab = Braidlab()
+braid, _ = braidlab.paths2braid(paths=trajectories_mat, angle=0)
+print(f"braid word: {braid}")
 
 ########################################################################################
 # Save figure
