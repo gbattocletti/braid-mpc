@@ -9,12 +9,11 @@ import numpy as np
 from mpl_toolkits.mplot3d import proj3d
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 
-from braid_controller.utils.braidlab_bridge import Braidlab
 from braid_controller.visualization.plot import tab10_colors, tab60_colors
 
 ########################################################################################
 # Load data
-experiment: str = "grids_m5_1"  # NOTE: change to plot another file
+experiment: str = "grids_m10_1"  # NOTE: change to plot another file
 folder = FilePath(__file__).resolve().parent / experiment
 
 # Load npz data
@@ -208,6 +207,12 @@ y_lims: np.ndarray = data["y_lim"]
 ax_paths.set_xlim(x_lims)
 ax_paths.set_ylim(y_lims)
 ax_paths.set_zlim(0, time[-1])
+ax_paths.set_xticks([])
+ax_paths.set_yticks([])
+ax_paths.set_zticks([])
+# ax_paths.set_xlabel("x")
+# ax_paths.set_ylabel("y")
+# ax_paths.set_zlabel("t")
 ax_paths.set_proj_type("ortho")
 pov = [45, 80, 0]
 try:
@@ -220,9 +225,6 @@ try:
     ax_paths.view_init(elev=pov[0], azim=pov[1], roll=pov[2])  # matplotlib >= 3.6
 except TypeError:
     ax_paths.view_init(elev=pov[0], azim=pov[1])
-ax_paths.set_xlabel("x")
-ax_paths.set_ylabel("y")
-ax_paths.set_zlabel("t")
 n, _, m = trajectories_mat.shape
 trajectories = []
 for i in range(m):
@@ -244,6 +246,7 @@ _, _, z_projected = proj3d.proj_transform(
     proj,
 )  # project in proj coordinates, z_projected encodes projection depth
 order = np.argsort(z_projected)
+order = np.flip(order)
 for rank, idx in enumerate(order):
     p1, p2 = seg_points[idx]
     ax_paths.plot(
@@ -254,14 +257,6 @@ for rank, idx in enumerate(order):
         linewidth=1.2,
         zorder=rank,
     )
-
-########################################################################################
-# Extract braid from paths
-angle = 0
-print(f"Computing braid word on angle {angle}...")
-braidlab = Braidlab()
-braid, _ = braidlab.paths2braid(paths=trajectories_mat, angle=angle)
-print(f"braid word: {braid}")
 
 ########################################################################################
 # Save figure
