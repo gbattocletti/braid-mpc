@@ -70,7 +70,7 @@ class Braidlab:
         matlab_angle = float(angle)
 
         # Call the MATLAB function to convert paths to braids
-        self.engine.cd(r"utils", nargout=0)
+        self.engine.cd(r"braid_controller/utils", nargout=0)
         braid_matlab, braid = self.engine.paths2braid(
             matlab_paths, matlab_angle, nargout=2
         )

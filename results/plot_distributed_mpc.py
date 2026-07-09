@@ -226,7 +226,7 @@ ax_paths.set_zlabel("t")
 n, _, m = trajectories_mat.shape
 trajectories = []
 for i in range(m):
-    trajectories.append(trajectories_mat[:, :, i])
+    trajectories.append(np.hstack([trajectories_mat[:, :, i], time[:, None]]))
 seg_points = []
 seg_colors = []
 for i, traj_i in enumerate(trajectories):
@@ -257,8 +257,10 @@ for rank, idx in enumerate(order):
 
 ########################################################################################
 # Extract braid from paths
+angle = 0
+print(f"Computing braid word on angle {angle}...")
 braidlab = Braidlab()
-braid, _ = braidlab.paths2braid(paths=trajectories_mat, angle=0)
+braid, _ = braidlab.paths2braid(paths=trajectories_mat, angle=angle)
 print(f"braid word: {braid}")
 
 ########################################################################################
