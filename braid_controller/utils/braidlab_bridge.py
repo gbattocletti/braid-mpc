@@ -30,6 +30,7 @@ class Braidlab:
                 "MATLAB functions are not supported on this platform due to the "
                 "dependency on the braidlab library."
             )
+        self.engine.cd(r"braid_controller/utils", nargout=0)
 
     def paths2braid(
         self, paths: np.ndarray, angle: float = 0
@@ -70,7 +71,6 @@ class Braidlab:
         matlab_angle = float(angle)
 
         # Call the MATLAB function to convert paths to braids
-        self.engine.cd(r"braid_controller/utils", nargout=0)
         braid_matlab, braid = self.engine.paths2braid(
             matlab_paths, matlab_angle, nargout=2
         )
@@ -91,7 +91,6 @@ class Braidlab:
         """
         matlab_word_1 = matlab.double(word_1.tolist())
         matlab_word_2 = matlab.double(word_2.tolist())
-        self.engine.cd(r"braid_controller/utils", nargout=0)
         are_equal = self.engine.compare_braids(matlab_word_1, matlab_word_2, nargout=1)
         return bool(are_equal)
 
