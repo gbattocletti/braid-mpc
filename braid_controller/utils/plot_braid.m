@@ -23,4 +23,5 @@ axis off;
 % Save figure
 exportgraphics(gca, 'braid.pdf', 'ContentType', 'vector', ...
                'BackgroundColor', 'none');
+exportgraphics(gca, 'braid.svg');
 close all;
