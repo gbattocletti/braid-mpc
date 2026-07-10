@@ -33,7 +33,10 @@ class Braidlab:
         self.engine.cd(r"braid_controller/utils", nargout=0)
 
     def paths2braid(
-        self, paths: np.ndarray, angle: float = 0
+        self,
+        paths: np.ndarray,
+        angle: float = 0,
+        flip_generators: bool = False,
     ) -> tuple[np.ndarray, "matlab.object"]:
         """
         Convert paths to braids using the braidlab library in MATLAB.
@@ -72,14 +75,16 @@ class Braidlab:
 
         # Call the MATLAB function to convert paths to braids
         braid_matlab, braid = self.engine.paths2braid(
-            matlab_paths, matlab_angle, nargout=2
+            matlab_paths, matlab_angle, flip_generators, nargout=2
         )
         braid = np.array(braid).flatten()
 
         return braid, braid_matlab
 
     def compare_braids(
-        self, word_1: np.ndarray, word_2: np.ndarray
+        self,
+        word_1: np.ndarray,
+        word_2: np.ndarray,
     ) -> tuple[bool, bool]:
         """
         Check comparison between braid words.
@@ -99,7 +104,10 @@ class Braidlab:
         )
         return bool(are_equal), bool(are_conjugate)
 
-    def plot_braid(self, braid_matlab: "matlab.object") -> None:
+    def plot_braid(
+        self,
+        braid_matlab: "matlab.object",
+    ) -> None:
         """
         Plot a braid using the braidlab library in MATLAB.
 
