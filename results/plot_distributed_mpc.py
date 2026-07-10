@@ -11,6 +11,8 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 
 from braid_controller.visualization.plot import tab10_colors, tab60_colors
 
+HIDE_LABELS = True
+
 ########################################################################################
 # Load data
 experiment: str = "grids_m10_1"  # NOTE: change to plot another file
@@ -86,9 +88,12 @@ ax_w_target.grid(
     zorder=1,
 )
 ax_w_target.minorticks_on()
-ax_w_target.set_xlabel(r"$\tau$")
-ax_w_target.set_ylabel(r"$w_{i,j}$")
-ax_w_target.grid(True)
+if HIDE_LABELS is True:
+    ax_w_target.set_xticklabels([])
+    ax_w_target.set_yticklabels([])
+else:
+    ax_w_target.set_xlabel(r"$\tau$")
+    ax_w_target.set_ylabel(r"$w_{i,j}$")
 
 
 # 2. Real windings
@@ -137,9 +142,12 @@ ax_w_real.grid(
     zorder=1,
 )
 ax_w_real.minorticks_on()
-ax_w_real.set_xlabel(r"$t$ [s]")
-ax_w_real.set_ylabel(r"$\bar{w}_{i,j}$")
-ax_w_real.grid(True)
+if HIDE_LABELS is True:
+    ax_w_real.set_xticklabels([])
+    ax_w_real.set_yticklabels([])
+else:
+    ax_w_real.set_xlabel(r"$t$ [s]")
+    ax_w_real.set_ylabel(r"$\bar{w}_{i,j}$")
 
 
 # 3. Tau
@@ -190,9 +198,12 @@ ax_tau.grid(
     zorder=1,
 )
 ax_tau.minorticks_on()
-ax_tau.set_xlabel(r"$t$ [s]")
-ax_tau.set_ylabel(r"$\tau(k), \tau_i(k)$")
-ax_tau.grid(True)
+if HIDE_LABELS is True:
+    ax_tau.set_xticklabels([])
+    ax_tau.set_yticklabels([])
+else:
+    ax_tau.set_xlabel(r"$t$ [s]")
+    ax_tau.set_ylabel(r"$\tau(k), \tau_i(k)$")
 
 
 # 4. Trajectories plot
@@ -207,12 +218,14 @@ y_lims: np.ndarray = data["y_lim"]
 ax_paths.set_xlim(x_lims)
 ax_paths.set_ylim(y_lims)
 ax_paths.set_zlim(0, time[-1])
-ax_paths.set_xticklabels([])
-ax_paths.set_yticklabels([])
-ax_paths.set_zticklabels([])
-# ax_paths.set_xlabel("x")
-# ax_paths.set_ylabel("y")
-# ax_paths.set_zlabel("t")
+if HIDE_LABELS is True:
+    ax_paths.set_xticklabels([])
+    ax_paths.set_yticklabels([])
+    ax_paths.set_zticklabels([])
+else:
+    ax_paths.set_xlabel("x")
+    ax_paths.set_ylabel("y")
+    ax_paths.set_zlabel("t")
 ax_paths.set_proj_type("ortho")
 pov = [45, 80, 0]  # pov = [45, -100, 0]
 try:
