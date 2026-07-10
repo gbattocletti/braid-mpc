@@ -340,7 +340,7 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
 
                 # Check braid equality
                 word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
-                are_equal = braidlab.compare_braids(target_word, word)
+                are_equal, are_conjugate = braidlab.compare_braids(target_word, word)
 
                 # Compute stats
                 t_sol_avg = np.mean(t_sol_mat, axis=0)
@@ -362,8 +362,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                 force_tot = np.sum(force)
 
                 # Print & save stats
-                print(f"Word matched: {are_equal}")
                 print(f"Word: {word}")
+                print(f"Word matched: {are_equal}")
+                print(f"Word conjugate: {are_conjugate}")
                 print(f"Total time: {time[-1]}")
                 print("Solver time:")
                 print(
@@ -381,7 +382,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
                 )
                 f.write("Centralized MPC\n")
+                f.write(f"Word: {word}")
                 f.write(f"Word matched: {are_equal}")
+                f.write(f"Word conjugate: {are_conjugate}")
                 f.write(f"Total time: {time[-1]}\n")
                 f.write(
                     f"Solver time (global): {t_sol_avg[0]:.4f}s "
@@ -598,7 +601,7 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
 
                 # Check braid equality
                 word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
-                are_equal = braidlab.compare_braids(target_word, word)
+                are_equal, are_conjugate = braidlab.compare_braids(target_word, word)
 
                 # Compute stats
                 t_sol_avg = np.mean(t_sol_mat, axis=0)
@@ -620,8 +623,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                 force_tot = np.sum(force)
 
                 # Print & save stats
-                print(f"Word matched: {are_equal}")
                 print(f"Word: {word}")
+                print(f"Word matched: {are_equal}")
+                print(f"Word conjugate: {are_conjugate}")
                 print(f"Total time: {time[-1]}")
                 print("Solver time:")
                 for i in range(m):
@@ -645,7 +649,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
                 )
                 f.write("Distributed MPC\n")
+                f.write(f"Word: {word}")
                 f.write(f"Word matched: {are_equal}")
+                f.write(f"Word conjugate: {are_conjugate}")
                 f.write(f"Total time: {time[-1]}\n")
                 for i in range(m):
                     f.write(
@@ -809,7 +815,7 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
 
                 # Check braid equality
                 word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
-                are_equal = braidlab.compare_braids(target_word, word)
+                are_equal, are_conjugate = braidlab.compare_braids(target_word, word)
 
                 # Compute stats
                 t_sol_avg = np.mean(t_sol_mat, axis=0)
@@ -831,8 +837,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                 force_tot = np.sum(force)
 
                 # Print & save stats
-                print(f"Word matched: {are_equal}")
                 print(f"Word: {word}")
+                print(f"Word matched: {are_equal}")
+                print(f"Word conjugate: {are_conjugate}")
                 print(f"Total time: {time[-1]}")
                 print("Solver time:")
                 for i in range(m):
@@ -856,8 +863,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
                 )
                 f.write("Grid Controller\n")
-                f.write(f"Word matched: {are_equal}")
                 f.write(f"Word: {word}")
+                f.write(f"Word matched: {are_equal}")
+                f.write(f"Word conjugate: {are_conjugate}")
                 f.write(f"Total time: {time[-1]}\n")
                 for i in range(m):
                     f.write(

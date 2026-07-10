@@ -1,4 +1,4 @@
-function are_equal = compare_braids(word_1, word_2)
+function [are_equal, are_conjugate] = compare_braids(word_1, word_2)
     % Check equality between two braid words
     braid_1 = compact(braidlab.braid(word_1));
     braid_2 = compact(braidlab.braid(word_2));
@@ -7,4 +7,5 @@ function are_equal = compare_braids(word_1, word_2)
     else
         are_equal = false;
     end
+    are_conjugate = conjtest(braid_1 , braid_2);
 end

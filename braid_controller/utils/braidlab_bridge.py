@@ -78,7 +78,9 @@ class Braidlab:
 
         return braid, braid_matlab
 
-    def compare_braids(self, word_1: np.ndarray, word_2: np.ndarray) -> bool:
+    def compare_braids(
+        self, word_1: np.ndarray, word_2: np.ndarray
+    ) -> tuple[bool, bool]:
         """
         Check comparison between braid words.
 
@@ -88,11 +90,14 @@ class Braidlab:
 
         Returns
             bool: 1 if words are equivalent, 0 if they are not.
+            bool: 1 if words are conjugate, 0 if they are not.
         """
         matlab_word_1 = matlab.double(word_1.tolist())
         matlab_word_2 = matlab.double(word_2.tolist())
-        are_equal = self.engine.compare_braids(matlab_word_1, matlab_word_2, nargout=1)
-        return bool(are_equal)
+        are_equal, are_conjugate = self.engine.compare_braids(
+            matlab_word_1, matlab_word_2, nargout=1
+        )
+        return bool(are_equal), bool(are_conjugate)
 
     def plot_braid(self, braid_matlab: "matlab.object") -> None:
         """
