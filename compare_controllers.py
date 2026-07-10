@@ -44,7 +44,7 @@ alpha_u: float = 0.05  # control weight
 alpha_g: float = 1  # scaling factor for goal tracking cost
 alpha_w: float = 20  # scaling factor for winding cost
 coeff_s: float = 20  # sharpness of sigmoid function for time-varying weights
-coeff_c: float = 0.9  # center of sigmoid function for time-varying weights [0,1]
+coeff_c: float = 0.95  # center of sigmoid function for time-varying weights [0,1]
 u_max: np.ndarray = np.array([0.5, 0.5])  # maximum control input (m/s)
 u_rate_max: np.ndarray = np.array([0.15, 0.15]) * dt  # max velocity change (a * dt)
 
@@ -146,9 +146,9 @@ for experiment in experiments:
     # Extract braid from paths
     angle = 0
     braidlab = Braidlab()
-    braid_word, _ = braidlab.paths2braid(paths=paths, angle=angle)
-    print(f"braid word: {braid_word}")
-    f.write(f"Braid word: {braid_word}\n\n")
+    target_word, _ = braidlab.paths2braid(paths=paths, angle=angle)
+    print(f"braid word: {target_word}")
+    f.write(f"Braid word: {target_word}\n\n")
 
     # Iterate over controllers and run simulations
     for controller in controllers:
@@ -326,6 +326,10 @@ for experiment in experiments:
             w_target_mat = w_target_mat[:step, :, :]
             t_sol_mat = t_sol_mat[:step, :]
 
+            # Check braid equality
+            word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
+            are_equal = braidlab.compare_braids(target_word, word)
+
             # Compute stats
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
@@ -346,6 +350,7 @@ for experiment in experiments:
             force_tot = np.sum(force)
 
             # Print & save stats
+            print(f"Word matched: {are_equal}")
             print(f"Total time: {time[-1]}")
             print("Solver time:")
             print(
@@ -363,6 +368,7 @@ for experiment in experiments:
                 f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
             )
             f.write("Centralized MPC\n")
+            f.write(f"Word matched: {are_equal}")
             f.write(f"Total time: {time[-1]}\n")
             f.write(
                 f"Solver time (global): {t_sol_avg[0]:.4f}s "
@@ -573,6 +579,10 @@ for experiment in experiments:
             w_target_mat = w_target_mat[:step, :, :]
             t_sol_mat = t_sol_mat[:step, :]
 
+            # Check braid equality
+            word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
+            are_equal = braidlab.compare_braids(target_word, word)
+
             # Compute stats
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
@@ -593,6 +603,7 @@ for experiment in experiments:
             force_tot = np.sum(force)
 
             # Print & save stats
+            print(f"Word matched: {are_equal}")
             print(f"Total time: {time[-1]}")
             print("Solver time:")
             for i in range(m):
@@ -616,6 +627,7 @@ for experiment in experiments:
                 f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
             )
             f.write("Distributed MPC\n")
+            f.write(f"Word matched: {are_equal}")
             f.write(f"Total time: {time[-1]}\n")
             for i in range(m):
                 f.write(
@@ -773,6 +785,10 @@ for experiment in experiments:
             w_target_mat = w_target_mat[:step, :, :]
             t_sol_mat = t_sol_mat[:step, :]
 
+            # Check braid equality
+            word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
+            are_equal = braidlab.compare_braids(target_word, word)
+
             # Compute stats
             t_sol_avg = np.mean(t_sol_mat, axis=0)
             t_sol_std = np.std(t_sol_mat, axis=0)
@@ -793,6 +809,7 @@ for experiment in experiments:
             force_tot = np.sum(force)
 
             # Print & save stats
+            print(f"Word matched: {are_equal}")
             print(f"Total time: {time[-1]}")
             print("Solver time:")
             for i in range(m):
@@ -816,6 +833,7 @@ for experiment in experiments:
                 f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
             )
             f.write("Grid Controller\n")
+            f.write(f"Word matched: {are_equal}")
             f.write(f"Total time: {time[-1]}\n")
             for i in range(m):
                 f.write(
