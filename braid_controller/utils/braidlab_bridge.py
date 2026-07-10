@@ -95,7 +95,7 @@ class Braidlab:
         matlab_word_1 = matlab.double(word_1.tolist())
         matlab_word_2 = matlab.double(word_2.tolist())
         are_equal, are_conjugate = self.engine.compare_braids(
-            matlab_word_1, matlab_word_2, nargout=1
+            matlab_word_1, matlab_word_2, nargout=2
         )
         return bool(are_equal), bool(are_conjugate)
 
