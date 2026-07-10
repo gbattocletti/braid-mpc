@@ -207,14 +207,14 @@ y_lims: np.ndarray = data["y_lim"]
 ax_paths.set_xlim(x_lims)
 ax_paths.set_ylim(y_lims)
 ax_paths.set_zlim(0, time[-1])
-ax_paths.set_xticks([])
-ax_paths.set_yticks([])
-ax_paths.set_zticks([])
+ax_paths.set_xticklabels([])
+ax_paths.set_yticklabels([])
+ax_paths.set_zticklabels([])
 # ax_paths.set_xlabel("x")
 # ax_paths.set_ylabel("y")
 # ax_paths.set_zlabel("t")
 ax_paths.set_proj_type("ortho")
-pov = [45, 80, 0]
+pov = [45, 80, 0]  # pov = [45, -100, 0]
 try:
     ax_paths.set_aspect("equalxy")
 except (ValueError, NotImplementedError):
