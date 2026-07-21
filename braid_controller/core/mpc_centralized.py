@@ -174,9 +174,7 @@ class CentralizedMPC(MPC):
 
         # Winding cost + winding constraints for guarantees on specification tracking
         for i in range(self.m):
-            for j in range(self.m):
-                if i == j:
-                    continue  # skip self-winding
+            for j in range(i + 1, self.m):
 
                 # Get weight for agent i w.r.t. agent j
                 alpha_w_ij: float = self.alpha_w[i, j]
@@ -268,12 +266,12 @@ class CentralizedMPC(MPC):
         # Warm start
         if use_warm_start is True and sol_prev is not None:
             self.ocp.set_initial(sol_prev.value_variables())
-        if use_warm_start is True and sol_prev is None and self.sol is not None:
+        elif use_warm_start is True and sol_prev is None and self.sol is not None:
             self.ocp.set_initial(self.sol.value_variables())
         else:
-            # always warm start with x_0 to avoid numerical errors
-            # See: https://github.com/casadi/casadi/discussions/3539
-            # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-"NaN-detected"in-my-optimization%3F  # pylint: disable=line-too-long
+            # Fallback: seed with the stationary point only when no prior solution. Warm
+            # start with x_0 to avoid numerical errors (See: https://github.com/casadi/casadi/discussions/3539
+            # https://github.com/casadi/casadi/wiki/FAQ:-Why-am-I-getting-"NaN-detected"in-my-optimization%3F)  # pylint: disable=line-too-long
             for i in range(self.m):
                 for k in range(self.K + 1):
                     self.ocp.set_initial(self.x[i][k, :], x_0[:, i])
@@ -293,15 +291,16 @@ class CentralizedMPC(MPC):
                 ub_g = np.array((self.ocp.debug.value(self.ocp.ubg))).flatten()
                 violation = np.maximum(g_val - ub_g, 0) + np.maximum(lb_g - g_val, 0)
                 violation_idx = np.argsort(violation)[-10:]  # 10 largest violations
-                for idx in violation_idx and self.debug is True:
-                    print(
-                        f"Constraint {idx}: "
-                        f"{self.ocp.debug.g_describe(idx)[158:-1]}."
-                        f"violation={violation[idx]:.4e}, "
-                        f"g={g_val[idx]:.4e}, "
-                        f"lb={lb_g[idx]:.4e}, ub={ub_g[idx]:.4e}"
-                    )
-                raise e
+                if self.debug:
+                    for idx in violation_idx:
+                        print(
+                            f"Constraint {idx}: "
+                            f"{self.ocp.debug.g_describe(idx)[158:-1]}."
+                            f"violation={violation[idx]:.4e}, "
+                            f"g={g_val[idx]:.4e}, "
+                            f"lb={lb_g[idx]:.4e}, ub={ub_g[idx]:.4e}"
+                        )
+                    raise e
 
         # Return the solution object
         return sol
