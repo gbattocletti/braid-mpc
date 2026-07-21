@@ -13,23 +13,23 @@ from braid_controller.visualization import plot
 
 # User-defined settings
 experiments = [
-    # "grids_m1_1.yaml",  # TODO
-    # "grids_m2_1.yaml",  # TODO
+    "grids_m3_1.yaml",
+    # "grids_m3_2.yaml",  # TODO
     # "grids_m3_3.yaml",  # TODO
-    # "grids_m5_1.yaml",
-    # "grids_m5_2.yaml",
+    "grids_m5_1.yaml",
+    "grids_m5_2.yaml",
     # "grids_m5_3.yaml",  # TODO
     "grids_m10_1.yaml",
-    # "grids_m10_2.yaml",
-    # "grids_m10_3.yaml",
-    # "grids_m10_4.yaml",
-    # "grids_m10_5.yaml",
-    # "grids_m10_6.yaml",
+    "grids_m10_2.yaml",
+    "grids_m10_3.yaml",
+    "grids_m10_4.yaml",
+    "grids_m10_5.yaml",
+    "grids_m10_6.yaml",
 ]
 
 controllers = [
     "distributed",
-    # "centralized",
+    "centralized",
     "grid",
 ]
 
@@ -382,9 +382,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
                 )
                 f.write("Centralized MPC\n")
-                f.write(f"Word: {word}")
-                f.write(f"Word matched: {are_equal}")
-                f.write(f"Word conjugate: {are_conjugate}")
+                f.write(f"Word: {word}\n")
+                f.write(f"Word matched: {are_equal}\n")
+                f.write(f"Word conjugate: {are_conjugate}\n")
                 f.write(f"Total time: {time[-1]}\n")
                 f.write(
                     f"Solver time (global): {t_sol_avg[0]:.4f}s "
@@ -395,7 +395,7 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                     f"({traj_min:.4f} -- {traj_max:.4f})\n"
                 )
                 f.write(
-                    f"Forces: {force_mean:.4f} +- {force_std:.4f}"
+                    f"Forces: {force_mean:.4f} +- {force_std:.4f} "
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})\n\n"
                 )
                 np.savez(
@@ -649,9 +649,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
                 )
                 f.write("Distributed MPC\n")
-                f.write(f"Word: {word}")
-                f.write(f"Word matched: {are_equal}")
-                f.write(f"Word conjugate: {are_conjugate}")
+                f.write(f"Word: {word}\n")
+                f.write(f"Word matched: {are_equal}\n")
+                f.write(f"Word conjugate: {are_conjugate}\n")
                 f.write(f"Total time: {time[-1]}\n")
                 for i in range(m):
                     f.write(
@@ -667,7 +667,7 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                     f"({traj_min:.4f} -- {traj_max:.4f})\n"
                 )
                 f.write(
-                    f"Forces: {force_mean:.4f} +- {force_std:.4f}"
+                    f"Forces: {force_mean:.4f} +- {force_std:.4f} "
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})\n\n"
                 )
                 np.savez(
@@ -814,7 +814,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                 t_sol_mat = t_sol_mat[:step, :]
 
                 # Check braid equality
-                word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
+                word, _ = braidlab.paths2braid(
+                    paths=trajectories, angle=angle, flip_generators=True
+                )  # fix projection error in grid controller  # TODO: fix this in GBC
                 are_equal, are_conjugate = braidlab.compare_braids(target_word, word)
 
                 # Compute stats
@@ -863,9 +865,9 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})"
                 )
                 f.write("Grid Controller\n")
-                f.write(f"Word: {word}")
-                f.write(f"Word matched: {are_equal}")
-                f.write(f"Word conjugate: {are_conjugate}")
+                f.write(f"Word: {word}\n")
+                f.write(f"Word matched: {are_equal}\n")
+                f.write(f"Word conjugate: {are_conjugate}\n")
                 f.write(f"Total time: {time[-1]}\n")
                 for i in range(m):
                     f.write(
@@ -881,7 +883,7 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                     f"({traj_min:.4f} -- {traj_max:.4f})\n"
                 )
                 f.write(
-                    f"Force: {force_mean:.4f} +- {force_std:.4f}"
+                    f"Force: {force_mean:.4f} +- {force_std:.4f} "
                     f"(max: {force_max:.4f}, tot: {force_tot:.4f})\n\n"
                 )
                 np.savez(
