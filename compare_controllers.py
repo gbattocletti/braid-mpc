@@ -1,3 +1,4 @@
+import importlib.util
 import os
 
 import matplotlib.pyplot as plt
@@ -5,9 +6,15 @@ import numpy as np
 
 from braid_controller.core import agent, mpc_centralized, mpc_distributed
 from braid_controller.utils import geometry, invariants, io, weights
-from braid_controller.utils.braidlab_bridge import Braidlab
 from braid_controller.utils.grid_controller import grid_controller
 from braid_controller.visualization import plot
+
+braidlab_available: bool = False
+try:
+    braidlab_available = importlib.util.find_spec("matlab.engine") is not None
+    from braid_controller.utils.braidlab_bridge import Braidlab
+except (ImportError, ValueError):
+    braidlab_available = False
 
 ## Settings ############################################################################
 
@@ -151,8 +158,11 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
 
         # Extract braid from paths
         angle = 0
-        braidlab = Braidlab()
-        target_word, _ = braidlab.paths2braid(paths=paths, angle=angle)
+        if braidlab_available:
+            braidlab = Braidlab()
+            target_word, _ = braidlab.paths2braid(paths=paths, angle=angle)
+        else:
+            target_word = []
         print(f"braid word: {target_word}")
         f.write(f"Braid word: {target_word}\n\n")
 
@@ -339,8 +349,15 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                 t_sol_mat = t_sol_mat[:step, :]
 
                 # Check braid equality
-                word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
-                are_equal, are_conjugate = braidlab.compare_braids(target_word, word)
+                if braidlab_available:
+                    word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
+                    are_equal, are_conjugate = braidlab.compare_braids(
+                        target_word, word
+                    )
+                else:
+                    word = []
+                    are_equal = None
+                    are_conjugate = None
 
                 # Compute stats
                 t_sol_avg = np.mean(t_sol_mat, axis=0)
@@ -600,8 +617,15 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                 t_sol_mat = t_sol_mat[:step, :]
 
                 # Check braid equality
-                word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
-                are_equal, are_conjugate = braidlab.compare_braids(target_word, word)
+                if braidlab_available:
+                    word, _ = braidlab.paths2braid(paths=trajectories, angle=angle)
+                    are_equal, are_conjugate = braidlab.compare_braids(
+                        target_word, word
+                    )
+                else:
+                    word = []
+                    are_equal = None
+                    are_conjugate = None
 
                 # Compute stats
                 t_sol_avg = np.mean(t_sol_mat, axis=0)
@@ -814,10 +838,20 @@ with open("results/results.txt", "w", encoding="utf-8") as f:
                 t_sol_mat = t_sol_mat[:step, :]
 
                 # Check braid equality
-                word, _ = braidlab.paths2braid(
-                    paths=trajectories, angle=angle, flip_generators=True
-                )  # fix projection error in grid controller  # TODO: fix this in GBC
-                are_equal, are_conjugate = braidlab.compare_braids(target_word, word)
+                # TODO: fix projection error in GBC
+                if braidlab_available:
+                    word, _ = braidlab.paths2braid(
+                        paths=trajectories,
+                        angle=angle,
+                        flip_generators=True,  # fix projection error in grid controller
+                    )
+                    are_equal, are_conjugate = braidlab.compare_braids(
+                        target_word, word
+                    )
+                else:
+                    word = []
+                    are_equal = None
+                    are_conjugate = None
 
                 # Compute stats
                 t_sol_avg = np.mean(t_sol_mat, axis=0)
